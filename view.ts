@@ -136,12 +136,12 @@ export class ManageContextView implements Component {
 					),
 				);
 			}
-			lines.push(this.theme.fg("muted", "y/enter confirm   n/esc cancel"));
+			lines.push(this.theme.fg("muted", "y/enter confirm   n back   esc/ctrl+c cancel"));
 		} else {
 			lines.push(
 				this.theme.fg(
 					"muted",
-					"↑/↓ move   space select/unselect   c compress   d delete   → preview   esc apply   ctrl+c cancel",
+					"↑/↓ move   space select/unselect   c compress   d delete   → preview   enter apply   esc/ctrl+c cancel",
 				),
 			);
 		}
@@ -216,7 +216,7 @@ export class ManageContextView implements Component {
 				lines.push(
 					this.theme.fg("dim", `line ${scrollTop + 1}-${scrollTop + viewportHeight} of ${fullLines.length}${hint}`),
 				);
-				lines.push(this.theme.fg("dim", "any key to close preview"));
+				lines.push(this.theme.fg("dim", "enter/esc/space/ctrl+c to close preview"));
 			}
 		}
 		return lines;
@@ -275,30 +275,13 @@ export class ManageContextView implements Component {
 			return;
 		}
 
-		if (matchesKey(data, "ctrl+c")) {
-			this.done();
-			return;
-		}
-		if (this.phase === "confirm") {
-			if (matchesKey(data, "y") || matchesKey(data, "enter")) {
-				this.startProcessing();
-			} else if (matchesKey(data, "n") || matchesKey(data, "escape")) {
-				this.phase = "editing";
-				this.tui.requestRender();
-			}
-			return;
-		}
-		if (matchesKey(data, "escape")) {
-			if (this.countDeleted() > 0 || this.countCompressed() > 0) {
-				this.phase = "confirm";
-				this.tui.requestRender();
-			} else {
-				this.startProcessing();
-			}
-			return;
-		}
 		if (this.previewGroupId) {
-			if (matchesKey(data, "enter") || matchesKey(data, "escape")) {
+			if (
+				matchesKey(data, "enter") ||
+				matchesKey(data, "escape") ||
+				matchesKey(data, "space") ||
+				matchesKey(data, "ctrl+c")
+			) {
 				this.previewGroupId = null;
 			} else {
 				const fullLines = this.previewLines();
@@ -322,6 +305,28 @@ export class ManageContextView implements Component {
 			this.tui.requestRender();
 			return;
 		}
+		if (matchesKey(data, "ctrl+c") || matchesKey(data, "escape")) {
+			this.done();
+			return;
+		}
+		if (this.phase === "confirm") {
+			if (matchesKey(data, "y") || matchesKey(data, "enter")) {
+				this.startProcessing();
+			} else if (matchesKey(data, "n")) {
+				this.phase = "editing";
+				this.tui.requestRender();
+			}
+			return;
+		}
+		if (matchesKey(data, "enter")) {
+			if (this.countDeleted() > 0 || this.countCompressed() > 0) {
+				this.phase = "confirm";
+				this.tui.requestRender();
+			} else {
+				this.startProcessing();
+			}
+			return;
+		}
 		if (matchesKey(data, "up")) this.moveCursor(-1);
 		else if (matchesKey(data, "down")) this.moveCursor(1);
 		else if (matchesKey(data, "pageUp")) this.moveCursor(-this.maxVisible);
@@ -329,7 +334,7 @@ export class ManageContextView implements Component {
 		else if (matchesKey(data, "space")) this.setMark(this.currentUnit().groupId, "unselected");
 		else if (matchesKey(data, "c")) this.setMark(this.currentUnit().groupId, "compressed");
 		else if (matchesKey(data, "d")) this.setMark(this.currentUnit().groupId, "deleted");
-		else if (matchesKey(data, "enter")) {
+		else if (matchesKey(data, "right")) {
 			this.previewGroupId = this.currentUnit().groupId;
 			this.previewScrollTop = 0;
 			this.previewScrollLeft = 0;
