@@ -141,7 +141,7 @@ export class ManageContextView implements Component {
 			lines.push(
 				this.theme.fg(
 					"muted",
-					"↑/↓ move   space select/unselect   c compress   d delete   enter preview   esc apply   ctrl+c cancel",
+					"↑/↓ move   space select/unselect   c compress   d delete   → preview   esc apply   ctrl+c cancel",
 				),
 			);
 		}
@@ -216,7 +216,7 @@ export class ManageContextView implements Component {
 				lines.push(
 					this.theme.fg("dim", `line ${scrollTop + 1}-${scrollTop + viewportHeight} of ${fullLines.length}${hint}`),
 				);
-				lines.push(this.theme.fg("dim", "enter to close preview"));
+				lines.push(this.theme.fg("dim", "any key to close preview"));
 			}
 		}
 		return lines;

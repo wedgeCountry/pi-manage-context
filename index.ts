@@ -6,6 +6,7 @@
  *   /manage_context                      open the picker
  *   /manage_context <provider>/<modelId> set the compression model, then open the picker
  *   /manage_context model                print the currently configured compression model
+ *   /toggle-read-hook                    toggle the read tool's post-execution hook (default: off)
  *
  * Keys inside the picker:
  *   Up/Down, PageUp/PageDown   navigate
@@ -33,6 +34,7 @@
  * packages for anything not covered by a comment here.
  */
 
+import { resolve } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type {
 	AutocompleteItem,
@@ -41,12 +43,38 @@ import type {
 	ExtensionAPI,
 	ExtensionCommandContext,
 	KeybindingsManager,
+	ToolResultEvent,
+	ToolResultEventResult,
 } from "@earendil-works/pi-coding-agent";
+import { isReadToolResult } from "@earendil-works/pi-coding-agent";
 
 import { buildFilteredMessages } from "./context-filter.js";
 import { loadState, saveState } from "./state.js";
-import { buildTurnUnits } from "./turn-units.js";
+import { buildTurnUnits, type TurnUnit } from "./turn-units.js";
 import { ManageContextView } from "./view.js";
+
+/**
+ * True if `unit` is an assistant turn whose *only* tool call is a read() on
+ * `resolvedPath`. Units that bundle other tool calls alongside the read are
+ * left alone — unselecting the unit would hide those other calls too, since
+ * a mark applies to the whole turn unit, not to one call within it.
+ */
+export function unitHasMatchingRead(unit: TurnUnit, resolvedPath: string, currentToolCallId: string): boolean {
+	if (unit.kind !== "assistant_tool") return false;
+	if (unit.anchorEntry.type !== "message" || unit.anchorEntry.message.role !== "assistant") return false;
+
+	const toolCalls = unit.anchorEntry.message.content.filter((block) => block.type === "toolCall");
+	if (toolCalls.length !== 1) return false;
+
+	const [toolCall] = toolCalls;
+	// Pro-forma: the current call's own unit shouldn't exist in
+	// buildContextEntries() yet at this point in the tool_result event, but
+	// never unselect the very call that just produced this result if it does.
+	if (toolCall.id === currentToolCallId) return false;
+	if (toolCall.name !== "read") return false;
+	const path = toolCall.arguments.path;
+	return typeof path === "string" && resolve(path) === resolvedPath;
+}
 
 export default function (pi: ExtensionAPI): void {
 	let cachedModels: Model<Api>[] = [];
@@ -61,6 +89,34 @@ export default function (pi: ExtensionAPI): void {
 		const state = loadState(ctx);
 		if (Object.keys(state.marks).length === 0) return; // nothing to change
 		return { messages: buildFilteredMessages(entries, units, state) };
+	});
+
+	pi.on("tool_result", (event: ToolResultEvent, ctx): ToolResultEventResult | void => {
+		if (!isReadToolResult(event)) return;
+		if (event.isError) return;
+
+		const state = loadState(ctx);
+		if (!state.readHookEnabled) return;
+
+		const path = event.input.path;
+		if (typeof path !== "string") return;
+		const resolvedPath = resolve(path);
+
+		const units = buildTurnUnits(ctx.sessionManager.buildContextEntries());
+		let changed = false;
+		for (const unit of units) {
+			if (!unitHasMatchingRead(unit, resolvedPath, event.toolCallId)) continue;
+
+			// Deletions are permanent by design (see the picker docs above) —
+			// never resurrect one into the lesser "unselected" state.
+			const mark = state.marks[unit.groupId]?.mark;
+			if (mark === "deleted" || mark === "unselected") continue;
+
+			state.marks[unit.groupId] = { mark: "unselected" };
+			changed = true;
+		}
+
+		if (changed) saveState(pi, state);
 	});
 
 	pi.registerCommand("manage_context", {
@@ -120,6 +176,16 @@ export default function (pi: ExtensionAPI): void {
 				(tui, theme, _kb: KeybindingsManager, done) => new ManageContextView(tui, theme, units, state, ctx, pi, done),
 				{ overlay: true },
 			);
+		},
+	});
+
+	pi.registerCommand("toggle-read-hook", {
+		description: "Toggle the read tool's post-execution hook on/off (default: off)",
+		handler: async (_args: string, ctx: ExtensionCommandContext) => {
+			const state = loadState(ctx);
+			state.readHookEnabled = !state.readHookEnabled;
+			saveState(pi, state);
+			ctx.ui.notify(`Read hook ${state.readHookEnabled ? "enabled" : "disabled"}`, "info");
 		},
 	});
 }

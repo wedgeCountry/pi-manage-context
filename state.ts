@@ -26,12 +26,14 @@ export interface ManageContextState {
 	compressionModel?: { provider: string; id: string };
 	/** keyed by TurnUnit.groupId */
 	marks: Record<string, MarkInfo>;
+	/** Switch checked by the read tool's "tool_result" hook. Toggled via /toggle-read-hook. */
+	readHookEnabled: boolean;
 }
 
 export const STATE_CUSTOM_TYPE = "manage-context";
 
 export function emptyState(): ManageContextState {
-	return { version: 1, marks: {} };
+	return { version: 1, marks: {}, readHookEnabled: false };
 }
 
 export function loadState(ctx: Pick<ExtensionContext, "sessionManager">): ManageContextState {
