@@ -9,9 +9,9 @@ import type { Api, ImageContent, Model, TextContent } from "@earendil-works/pi-a
 import type { ExtensionContext, SessionMessageEntry } from "@earendil-works/pi-coding-agent";
 import { sessionEntryToContextMessages } from "@earendil-works/pi-coding-agent";
 
-import type { ManageContextState } from "./state.js";
-import { contentToPreviewText } from "./turn-units.js";
-import type { TurnUnit } from "./turn-units.js";
+import type { ManageContextState } from "./state.ts";
+import { contentToPreviewText } from "./turn-units.ts";
+import type { TurnUnit } from "./turn-units.ts";
 
 const COMPRESSION_SYSTEM_PROMPT = `You compress a single entry from an AI coding agent's conversation history so it can be kept in context at a fraction of the size.
 

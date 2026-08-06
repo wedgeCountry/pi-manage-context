@@ -8,8 +8,8 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { sessionEntryToContextMessages } from "@earendil-works/pi-coding-agent";
 
-import type { ManageContextState } from "./state.js";
-import type { TurnUnit } from "./turn-units.js";
+import type { ManageContextState } from "./state.ts";
+import type { TurnUnit } from "./turn-units.ts";
 
 function cloneWithReplacedContent(message: AgentMessage, compressedText: string): AgentMessage {
 	const anyMsg = message as Record<string, unknown> & { role: string };

@@ -8,11 +8,11 @@ import { matchesKey, sliceByColumn, truncateToWidth, visibleWidth } from "@earen
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
 
-import { compressUnit, renderUnitForCompression, resolveCompressionModel } from "./compression.js";
-import { saveState } from "./state.js";
-import type { Mark, ManageContextState } from "./state.js";
-import { oneLine } from "./turn-units.js";
-import type { TurnUnit } from "./turn-units.js";
+import { compressUnit, renderUnitForCompression, resolveCompressionModel } from "./compression.ts";
+import { saveState } from "./state.ts";
+import type { Mark, ManageContextState } from "./state.ts";
+import { oneLine } from "./turn-units.ts";
+import type { TurnUnit } from "./turn-units.ts";
 
 interface LogLine {
 	text: string;

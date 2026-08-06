@@ -2,8 +2,8 @@ import { resolve } from "node:path";
 import type { SessionMessageEntry } from "@earendil-works/pi-coding-agent";
 import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
-import { unitHasMatchingRead } from "./index.ts";
-import type { TurnUnit } from "./turn-units.ts";
+import { unitHasMatchingRead } from "../index.ts";
+import type { TurnUnit } from "../src/turn-units.ts";
 
 const usage: Usage = {
   input: 0,

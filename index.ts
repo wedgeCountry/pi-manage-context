@@ -48,10 +48,10 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { isReadToolResult } from "@earendil-works/pi-coding-agent";
 
-import { buildFilteredMessages } from "./context-filter.js";
-import { loadState, saveState } from "./state.js";
-import { buildTurnUnits, type TurnUnit } from "./turn-units.js";
-import { ManageContextView } from "./view.js";
+import { buildFilteredMessages } from "./src/context-filter.ts";
+import { loadState, saveState } from "./src/state.ts";
+import { buildTurnUnits, type TurnUnit } from "./src/turn-units.ts";
+import { ManageContextView } from "./src/view.ts";
 
 /**
  * True if `unit` is an assistant turn whose *only* tool call is a read() on
