@@ -15,3 +15,9 @@ There is also a preview window to see the content of individual messages.
 An option /toggle-read-hook is provided. 
 
 If enabled, then old read results of the same file will be deselected in order to save tokens.
+
+## Install in a project
+
+```bash
+pi install git:github.com/wedgeCountry/pi-manage-context.git
+```
