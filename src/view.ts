@@ -51,7 +51,7 @@ export class ManageContextView implements Component {
 		private readonly pi: ExtensionAPI,
 		private readonly done: (result: void) => void,
 	) {
-		this.maxVisible = Math.max(5, Math.min(units.length, 20));
+		this.maxVisible = Math.max(5, Math.min(units.length, 100));
 	}
 
 	invalidate(): void {}
