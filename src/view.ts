@@ -26,14 +26,19 @@ export class ManageContextView implements Component {
 	private phase: "editing" | "confirm" | "processing" | "analyzing" = "editing";
 	private cursor = 0;
 	private scrollTop = 0;
-	private readonly maxVisible: number;
+	// Recomputed on every render() from the live terminal size so the picker
+	// grows/shrinks with the window instead of a fixed row count; the
+	// constructor value is just a fallback for the (unlikely) case
+	// handleInput runs before the first render.
+	private maxVisible: number;
 	private previewGroupId: string | null = null;
 	private previewScrollTop = 0;
 	private previewScrollLeft = 0;
 	// Cached from the last render() call so handleInput (which gets no width)
 	// can clamp/step horizontal scroll against the actual box content width.
 	private previewContentWidth = 40;
-	private readonly previewMaxVisible = 30;
+	// Also recomputed each render(), same reasoning as maxVisible above.
+	private previewMaxVisible = 20;
 	private readonly previewHScrollStep = 4;
 	private showRetentionInfo = false; // Toggle to show retention information in preview
 	private previewMode: "compact" | "detailed" = "compact"; // Toggle between compact and detailed view
@@ -54,7 +59,7 @@ export class ManageContextView implements Component {
 		private readonly pi: ExtensionAPI,
 		private readonly done: (result: void) => void,
 	) {
-		this.maxVisible = Math.max(5, Math.min(units.length, 100));
+		this.maxVisible = Math.max(5, Math.min(units.length, Math.max(5, tui.terminal.rows - 8)));
 	}
 
 	invalidate(): void {}
@@ -220,6 +225,17 @@ export class ManageContextView implements Component {
 		}
 		lines.push(rule);
 
+		// Fit the list to the live terminal height: the header chrome above is
+		// already known at this point (lines.length so far, plus the footer
+		// status line pushed below), so whatever rows remain go to the list.
+		// When the preview pane is open too, split the remainder between them
+		// instead of letting the list claim it all.
+		const availableRows = Math.max(1, this.tui.terminal.rows);
+		const chromeSoFar = lines.length + 1; // + statusLine pushed below
+		const remaining = Math.max(0, availableRows - chromeSoFar - 1);
+		const listBudget = this.previewGroupId ? Math.max(3, Math.floor(remaining * 0.45)) : remaining;
+		this.maxVisible = Math.max(Math.min(5, this.units.length), Math.min(this.units.length, listBudget));
+
 		const start = this.scrollTop;
 		const end = Math.min(this.units.length, start + this.maxVisible);
 		const showScrollbar = this.units.length > this.maxVisible;
@@ -266,6 +282,12 @@ export class ManageContextView implements Component {
 				const boxWidth = Math.max(20, width);
 				const contentWidth = Math.max(4, boxWidth - 5); // "│ " + content + " " + scrollbar col + "│"
 				this.previewContentWidth = contentWidth;
+
+				// Same idea as the list above: whatever terminal rows remain
+				// after the header, list, footer, and this box's own
+				// border/hint chrome go to the preview's visible line count.
+				const previewChrome = 6; // blank + top border + bottom border + line-info hint + close hint + slack
+				this.previewMaxVisible = Math.max(3, this.tui.terminal.rows - lines.length - previewChrome);
 
 				const fullLines = this.previewLines();
 				const viewportHeight = Math.max(1, Math.min(this.previewMaxVisible, fullLines.length));
@@ -527,7 +549,8 @@ export class ManageContextView implements Component {
 			this.theme.fg("accent", "█".repeat(filled)) + this.theme.fg("dim", "░".repeat(Math.max(0, barWidth - filled)));
 		lines.push(`  [${bar}] ${this.theme.fg("muted", `${this.progressDone}/${this.progressTotal}`)}`);
 		lines.push("");
-		for (const entry of this.log.slice(-15)) {
+		const logRows = Math.max(3, this.tui.terminal.rows - 8);
+		for (const entry of this.log.slice(-logRows)) {
 			const color = entry.kind === "ok" ? "success" : entry.kind === "error" ? "error" : "muted";
 			lines.push(`  ${this.theme.fg(color, entry.text)}`);
 		}
