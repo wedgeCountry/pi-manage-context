@@ -8,11 +8,11 @@ import { matchesKey, sliceByColumn, truncateToWidth, visibleWidth } from "@earen
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
 
-import { compressUnit, renderUnitForCompression, resolveCompressionModel } from "./compression.ts";
+import { compressUnit, renderUnitForCompression, resolveCompressionModel, generateRetentionSummary } from "./compression.ts";
 import { saveState } from "./state.ts";
 import type { Mark, ManageContextState } from "./state.ts";
-import { oneLine } from "./turn-units.ts";
-import type { TurnUnit } from "./turn-units.ts";
+import { oneLine, contentToPreviewText, extractToolArguments, extractKeyFacts, generateHeading } from "./turn-units.ts";
+import type { TurnUnit, TurnUnitMetadata } from "./turn-units.ts";
 
 interface LogLine {
 	text: string;
@@ -20,7 +20,7 @@ interface LogLine {
 }
 
 export class ManageContextView implements Component {
-	private phase: "editing" | "confirm" | "processing" = "editing";
+	private phase: "editing" | "confirm" | "processing" | "analyzing" = "editing";
 	private cursor = 0;
 	private scrollTop = 0;
 	private readonly maxVisible: number;
@@ -32,6 +32,8 @@ export class ManageContextView implements Component {
 	private previewContentWidth = 40;
 	private readonly previewMaxVisible = 20;
 	private readonly previewHScrollStep = 4;
+	private showRetentionInfo = false; // Toggle to show retention information in preview
+	private previewMode: "compact" | "detailed" = "compact"; // Toggle between compact and detailed view
 
 	// processing phase
 	private progressDone = 0;
@@ -98,7 +100,10 @@ export class ManageContextView implements Component {
 		if (info?.compressedText) {
 			return `compressed (${info.originalTokenEstimate ?? unit.tokenEstimate} → ${info.compressedTokenEstimate ?? "?"} tok)`;
 		}
-		return unit.preview;
+		// Enhanced preview: show type badge, heading, and key info
+		const typeBadge = this.theme.fg("muted", `[${unit.metadata.type}]`);
+		const heading = this.theme.bold(unit.metadata.heading);
+		return `${typeBadge} ${heading}`;
 	}
 
 	render(width: number): string[] {
@@ -144,6 +149,7 @@ export class ManageContextView implements Component {
 					"↑/↓ move   space select/unselect   c compress   d delete   → preview   enter apply   esc/ctrl+c cancel",
 				),
 			);
+			lines.push(this.theme.fg("dim", "preview shows: heading, type, timestamps, tool calls, key facts, retention info"));
 		}
 		lines.push("");
 
@@ -216,7 +222,7 @@ export class ManageContextView implements Component {
 				lines.push(
 					this.theme.fg("dim", `line ${scrollTop + 1}-${scrollTop + viewportHeight} of ${fullLines.length}${hint}`),
 				);
-				lines.push(this.theme.fg("dim", "enter/esc/space/ctrl+c to close preview"));
+				lines.push(this.theme.fg("dim", "enter/esc/space/ctrl+c to close preview   r toggle retention   m toggle mode"));
 			}
 		}
 		return lines;
@@ -226,8 +232,211 @@ export class ManageContextView implements Component {
 		const unit = this.units.find((u) => u.groupId === this.previewGroupId);
 		if (!unit) return [];
 		const compressedText = this.state.marks[unit.groupId]?.compressedText;
-		const full = compressedText || renderUnitForCompression(unit) || unit.preview;
-		return full.split("\n");
+		
+		if (compressedText) {
+			return this.renderCompressedPreview(unit, compressedText);
+		}
+		
+		if (this.previewMode === "detailed") {
+			return this.renderDetailedPreview(unit);
+		}
+		
+		return this.renderEnhancedPreview(unit);
+	}
+
+	/**
+	 * Render enhanced preview with metadata for the original entry.
+	 */
+	private renderEnhancedPreview(unit: TurnUnit): string[] {
+		const lines: string[] = [];
+		
+		// Header section
+		lines.push(this.theme.fg("accent", `═`.repeat(50)));
+		lines.push(this.theme.fg("accent", `┌─ preview ${unit.metadata.type} ─${"─".repeat(Math.max(0, 44 - unit.metadata.type.length))}┐`));
+		lines.push(this.theme.fg("accent", `│ ${this.theme.bold(unit.metadata.heading)}${" ".repeat(Math.max(0, 44 - unit.metadata.heading.length))}│`));
+		lines.push(this.theme.fg("accent", `│ Time: ${unit.timestamp}${" ".repeat(Math.max(0, 44 - `Time: ${unit.timestamp}`.length))}│`));
+		lines.push(this.theme.fg("accent", `│ Tokens: ${unit.tokenEstimate}${" ".repeat(Math.max(0, 43 - `Tokens: ${unit.tokenEstimate}`.length))}│`));
+		lines.push(this.theme.fg("accent", `│ Importance: ${unit.metadata.importanceScore}/100${" ".repeat(Math.max(0, 37 - `Importance: ${unit.metadata.importanceScore}/100`.length))}│`));
+		lines.push(this.theme.fg("accent", `═`.repeat(50)));
+		lines.push("");
+		
+		// Tool calls section (if applicable)
+		if (unit.metadata.toolCalls && unit.metadata.toolCalls.length > 0) {
+			lines.push(this.theme.fg("accent", "Tool Calls:"));
+			lines.push(this.theme.fg("muted", "─".repeat(20)));
+			
+			unit.metadata.toolCalls.forEach((toolCall, idx) => {
+				lines.push(` ${idx + 1}. ${toolCall.name}`);
+				lines.push(`    Arguments:`);
+				
+				// Format arguments
+				const argLines = JSON.stringify(toolCall.arguments, null, 2).split("\n");
+				argLines.forEach(line => {
+					lines.push(`    ${line}`);
+				});
+				
+				// Show result
+				if (toolCall.result) {
+					lines.push(`    Result: ${toolCall.description || toolCall.result}`);
+				}
+				lines.push("");
+			});
+			
+			lines.push(this.theme.fg("muted", "─".repeat(20)));
+			lines.push("");
+		}
+		
+		// Content section
+		lines.push(this.theme.fg("accent", "Content:"));
+		lines.push(this.theme.fg("muted", "─".repeat(20)));
+		const content = unit.metadata.summary;
+		const contentLines = content.split("\n");
+		contentLines.slice(0, 10).forEach(line => {
+			lines.push(this.theme.fg("text", oneLine(line, 45)));
+		});
+		if (contentLines.length > 10) {
+			lines.push(`... (${contentLines.length - 10} more lines)`);
+		}
+		lines.push("");
+		
+		// Key facts section
+		if (unit.metadata.keyFacts && unit.metadata.keyFacts.length > 0) {
+			lines.push(this.theme.fg("accent", "Key Facts:"));
+			lines.push(this.theme.fg("muted", "─".repeat(20)));
+			unit.metadata.keyFacts.forEach(fact => {
+				lines.push(` • ${fact}`);
+			});
+			lines.push("");
+		}
+		
+		// Retention reason
+		if (unit.metadata.retentionReason) {
+			lines.push(this.theme.fg("accent", "Retention Reason:"));
+			lines.push(this.theme.fg("muted", "─".repeat(20)));
+			lines.push(unit.metadata.retentionReason);
+			lines.push("");
+		}
+		
+		// Show retention summary when toggle is enabled
+		if (this.showRetentionInfo) {
+			lines.push(this.theme.fg("accent", "═".repeat(50)));
+			lines.push(this.theme.fg("accent", "RETENTION ANALYSIS:"));
+			lines.push(this.theme.fg("muted", "─".repeat(20)));
+			const retentionSummary = generateRetentionSummary(unit);
+			const summaryLines = retentionSummary.split("\n");
+			summaryLines.forEach(line => {
+				lines.push(this.theme.fg("dim", line));
+			});
+			lines.push("");
+			lines.push(this.theme.fg("dim", "Press 'r' to hide retention analysis"));
+		}
+		
+		return lines;
+	}
+
+	/**
+	 * Render detailed preview for the original entry (LLM-optimized format).
+	 */
+	private renderDetailedPreview(unit: TurnUnit): string[] {
+		const lines: string[] = [];
+		
+		// Header
+		lines.push(this.theme.fg("accent", "═".repeat(60)));
+		lines.push(this.theme.fg("accent", "┌─ detailed preview (LLM-optimized) ──────────────────────────┐"));
+		lines.push(this.theme.fg("accent", `│ ${this.theme.bold(unit.metadata.heading)}${" ".repeat(Math.max(0, 58 - unit.metadata.heading.length))}│`));
+		lines.push(this.theme.fg("accent", `│ Type: ${unit.metadata.type}${" ".repeat(Math.max(0, 55 - `Type: ${unit.metadata.type}`.length))}│`));
+		lines.push(this.theme.fg("accent", `│ Time: ${unit.timestamp}${" ".repeat(Math.max(0, 55 - `Time: ${unit.timestamp}`.length))}│`));
+		lines.push(this.theme.fg("accent", `│ Tokens: ${unit.tokenEstimate} | Importance: ${unit.metadata.importanceScore}/100${" ".repeat(Math.max(0, 42 - `Tokens: ${unit.tokenEstimate} | Importance: ${unit.metadata.importanceScore}/100`.length))}│`));
+		lines.push(this.theme.fg("accent", "═".repeat(60)));
+		lines.push("");
+		
+		// Tool calls (if applicable)
+		if (unit.metadata.toolCalls && unit.metadata.toolCalls.length > 0) {
+			lines.push(this.theme.fg("accent", "TOOL CALLS:"));
+			lines.push(this.theme.fg("muted", "─".repeat(25)));
+			
+			unit.metadata.toolCalls.forEach((toolCall, idx) => {
+				lines.push(`\n${idx + 1}. ${this.theme.bold(toolCall.name)}`);
+				lines.push(`   Arguments: ${JSON.stringify(toolCall.arguments, null, 2)}`);
+				if (toolCall.result) {
+					lines.push(`   Result: ${toolCall.description || toolCall.result}`);
+				}
+			});
+			lines.push("");
+		}
+		
+		// Key facts
+		if (unit.metadata.keyFacts && unit.metadata.keyFacts.length > 0) {
+			lines.push(this.theme.fg("accent", "KEY FACTS:"));
+			lines.push(this.theme.fg("muted", "─".repeat(25)));
+			unit.metadata.keyFacts.forEach(fact => {
+				lines.push(`• ${fact}`);
+			});
+			lines.push("");
+		}
+		
+		// Content
+		lines.push(this.theme.fg("accent", "CONTENT:"));
+		lines.push(this.theme.fg("muted", "─".repeat(25)));
+		const contentLines = unit.metadata.summary.split("\n");
+		contentLines.slice(0, 15).forEach(line => {
+			lines.push(this.theme.fg("text", oneLine(line, 55)));
+		});
+		if (contentLines.length > 15) {
+			lines.push(`... (${contentLines.length - 15} more lines)`);
+		}
+		lines.push("");
+		
+		// Retention reason
+		if (unit.metadata.retentionReason) {
+			lines.push(this.theme.fg("accent", "RETENTION REASON:"));
+			lines.push(this.theme.fg("muted", "─".repeat(25)));
+			lines.push(unit.metadata.retentionReason);
+			lines.push("");
+		}
+		
+		// Retention summary
+		if (this.showRetentionInfo) {
+			lines.push(this.theme.fg("accent", "═".repeat(60)));
+			lines.push(this.theme.fg("accent", "RETENTION ANALYSIS:"));
+			lines.push(this.theme.fg("muted", "─".repeat(25)));
+			const retentionSummary = generateRetentionSummary(unit);
+			const summaryLines = retentionSummary.split("\n");
+			summaryLines.forEach(line => {
+				lines.push(this.theme.fg("dim", line));
+			});
+			lines.push("");
+			lines.push(this.theme.fg("dim", "Press 'r' to hide retention analysis"));
+		}
+		
+		lines.push(this.theme.fg("dim", "Press 'm' to switch to compact view   enter/esc/space/ctrl+c to close"));
+		
+		return lines;
+	}
+
+	/**
+	 * Render preview for a compressed entry.
+	 */
+	private renderCompressedPreview(unit: TurnUnit, compressedText: string): string[] {
+		const lines: string[] = [];
+		lines.push(this.theme.fg("accent", `═`.repeat(50)));
+		lines.push(this.theme.fg("accent", `┌─ compressed entry ─${"─".repeat(33)}┐`));
+		lines.push(this.theme.fg("accent", `│ ${this.theme.bold(unit.metadata.heading)}${" ".repeat(Math.max(0, 44 - unit.metadata.heading.length))}│`));
+		lines.push(this.theme.fg("accent", `│ Compressed: ${unit.tokenEstimate} → ~${unit.metadata.importanceScore} tok${" ".repeat(Math.max(0, 30 - `Compressed: ${unit.tokenEstimate} → ~${unit.metadata.importanceScore} tok`.length))}│`));
+		lines.push(this.theme.fg("accent", `═`.repeat(50)));
+		lines.push("");
+		
+		// Show compressed content
+		const contentLines = compressedText.split("\n");
+		contentLines.slice(0, 15).forEach(line => {
+			lines.push(this.theme.fg("text", oneLine(line, 45)));
+		});
+		if (contentLines.length > 15) {
+			lines.push(`... (${contentLines.length - 15} more lines)`);
+		}
+		lines.push("");
+		
+		return lines;
 	}
 
 	/** Shared thumb-geometry math for both the vertical and horizontal scrollbars. */
@@ -283,6 +492,12 @@ export class ManageContextView implements Component {
 				matchesKey(data, "ctrl+c")
 			) {
 				this.previewGroupId = null;
+			} else if (matchesKey(data, "r")) {
+				// Toggle retention info display
+				this.showRetentionInfo = !this.showRetentionInfo;
+			} else if (matchesKey(data, "m")) {
+				// Toggle preview mode (compact/detailed)
+				this.previewMode = this.previewMode === "compact" ? "detailed" : "compact";
 			} else {
 				const fullLines = this.previewLines();
 				const viewportHeight = Math.max(1, Math.min(this.previewMaxVisible, fullLines.length));
@@ -365,6 +580,15 @@ export class ManageContextView implements Component {
 		saveState(this.pi, this.state);
 
 		void this.runCompressions(toCompress);
+	}
+
+	/**
+	 * Export current context as markdown.
+	 */
+	private exportToMarkdown(): void {
+		// This would be called from a separate export command
+		// For now, we'll just note that this method exists
+		// to be used by the main extension entry point
 	}
 
 	private async runCompressions(units: TurnUnit[]): Promise<void> {

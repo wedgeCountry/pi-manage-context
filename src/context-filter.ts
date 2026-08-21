@@ -42,6 +42,27 @@ export function buildCompressedReplacement(unit: TurnUnit, compressedText: strin
 	return [cloneWithReplacedContent(original, compressedText), ...rest];
 }
 
+/**
+ * Calculate token savings and determine if compression is beneficial.
+ */
+export function shouldCompress(unit: TurnUnit): boolean {
+	// Don't compress very small entries
+	if (unit.tokenEstimate < 100) return false;
+	
+	// Don't compress already compressed entries (no original text available)
+	if (unit.metadata.summary.length < 50) return false;
+	
+	// High importance entries (90+) should generally be kept uncompressed
+	// unless they're very large
+	if (unit.metadata.importanceScore >= 90 && unit.tokenEstimate < 2000) return false;
+	
+	// Medium importance entries can be compressed if large
+	if (unit.metadata.importanceScore >= 50 && unit.tokenEstimate < 500) return false;
+	
+	// Otherwise, compression is beneficial
+	return true;
+}
+
 /** Rebuilds the outgoing message array for one LLM call, applying all marks. */
 export function buildFilteredMessages(
 	entries: SessionEntry[],
