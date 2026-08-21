@@ -19,6 +19,9 @@ interface LogLine {
 	kind: "ok" | "error" | "info";
 }
 
+/** One entry from `TurnUnitMetadata.toolCalls` — kept local since it's only used for display formatting. */
+type ToolCallInfo = NonNullable<TurnUnitMetadata["toolCalls"]>[number];
+
 export class ManageContextView implements Component {
 	private phase: "editing" | "confirm" | "processing" | "analyzing" = "editing";
 	private cursor = 0;
@@ -95,15 +98,49 @@ export class ManageContextView implements Component {
 		}
 	}
 
+	/** Short, role-colored tag echoing the chat-transcript styling /tree uses ("user:", "assistant:", …). */
+	private kindTag(unit: TurnUnit): string {
+		switch (unit.kind) {
+			case "user":
+				return this.theme.fg("accent", "user");
+			case "assistant_text":
+				return this.theme.fg("success", "assistant");
+			case "assistant_tool":
+				return this.theme.fg("toolTitle", "tools");
+			case "custom_message":
+				return this.theme.fg("customMessageLabel", unit.metadata.type.replace(/^custom_/, ""));
+		}
+	}
+
+	/** Compact "name(args)" summary for one tool call, in the spirit of /tree's per-tool formatting. */
+	private summarizeToolArgs(name: string, args: Record<string, unknown>): string {
+		const path = args.path ?? args.file_path;
+		if (typeof path === "string" && (name === "read" || name === "write" || name === "edit" || name === "ls")) return path;
+		if (name === "bash" && typeof args.command === "string") return oneLine(String(args.command), 50);
+		if (name === "grep" && typeof args.pattern === "string") return `/${args.pattern}/`;
+		try {
+			return oneLine(JSON.stringify(args), 50);
+		} catch {
+			return "";
+		}
+	}
+
+	private formatToolCallLine(toolCall: ToolCallInfo): string {
+		const argsStr = this.summarizeToolArgs(toolCall.name, toolCall.arguments);
+		const failed = toolCall.description?.startsWith("✗") || /error|failed/i.test(toolCall.result ?? "");
+		const status = this.theme.fg(failed ? "error" : "success", failed ? "✗" : "✓");
+		const args = argsStr ? this.theme.fg("dim", `(${argsStr})`) : "";
+		return `${status} ${this.theme.fg("toolTitle", toolCall.name)}${args}`;
+	}
+
 	private labelFor(unit: TurnUnit): string {
 		const info = this.state.marks[unit.groupId];
 		if (info?.compressedText) {
-			return `compressed (${info.originalTokenEstimate ?? unit.tokenEstimate} → ${info.compressedTokenEstimate ?? "?"} tok)`;
+			const from = info.originalTokenEstimate ?? unit.tokenEstimate;
+			const to = info.compressedTokenEstimate ?? "?";
+			return `${this.theme.fg("warning", "compressed")} ${this.theme.fg("dim", `(${from} → ${to} tok)`)}`;
 		}
-		// Enhanced preview: show type badge, heading, and key info
-		const typeBadge = this.theme.fg("muted", `[${unit.metadata.type}]`);
-		const heading = this.theme.bold(unit.metadata.heading);
-		return `${typeBadge} ${heading}`;
+		return `${this.kindTag(unit)}  ${unit.metadata.heading}`;
 	}
 
 	render(width: number): string[] {
@@ -119,9 +156,44 @@ export class ManageContextView implements Component {
 		return this.units.filter((u) => this.markOf(u.groupId) === "compressed").length;
 	}
 
+	private rule(width: number, color: Parameters<Theme["fg"]>[0] = "border"): string {
+		return this.theme.fg(color, "─".repeat(Math.max(1, width)));
+	}
+
+	/** Compact, /tree-style keybinding legend: short phrases joined by " · ". */
+	private helpLine(width: number): string {
+		const hints = ["↑/↓ move", "space select", "c compress", "d delete", "→ preview", "enter apply", "esc cancel"];
+		return truncateToWidth(this.theme.fg("muted", `  ${hints.join("  ·  ")}`), width, "…");
+	}
+
+	/** Glyph legend, so the mark language reads at a glance without memorizing keys. */
+	private legendLine(): string {
+		const items: [Mark, string][] = [
+			["selected", "selected"],
+			["unselected", "unselected"],
+			["compressed", "compressed"],
+			["deleted", "deleted"],
+		];
+		const parts = items.map(([mark, label]) => `${this.glyphFor(mark)} ${this.theme.fg("dim", label)}`);
+		return `  ${parts.join("   ")}`;
+	}
+
+	/** Persistent status footer: cursor position plus a live count of pending marks. */
+	private statusLine(start: number, end: number): string {
+		const nDeleted = this.countDeleted();
+		const nCompressed = this.countCompressed();
+		const parts = [this.theme.fg("muted", `${start + 1}-${end} of ${this.units.length}`)];
+		if (nDeleted > 0) parts.push(this.theme.fg("error", `${nDeleted} to delete`));
+		if (nCompressed > 0) parts.push(this.theme.fg("warning", `${nCompressed} to compress`));
+		return `  ${parts.join(this.theme.fg("dim", "   ·   "))}`;
+	}
+
 	private renderEditing(width: number): string[] {
 		const lines: string[] = [];
-		lines.push(this.theme.bold(this.theme.fg("accent", "Manage context")));
+		const rule = this.rule(width);
+
+		lines.push(rule);
+		lines.push(`  ${this.theme.bold(this.theme.fg("accent", "Manage context"))}`);
 		if (this.phase === "confirm") {
 			const nDeleted = this.countDeleted();
 			const nCompressed = this.countCompressed();
@@ -129,7 +201,7 @@ export class ManageContextView implements Component {
 				lines.push(
 					this.theme.fg(
 						"error",
-						`Permanently delete ${nDeleted} ${nDeleted === 1 ? "entry" : "entries"}? This cannot be undone.`,
+						`  Permanently delete ${nDeleted} ${nDeleted === 1 ? "entry" : "entries"}? This cannot be undone.`,
 					),
 				);
 			}
@@ -137,35 +209,50 @@ export class ManageContextView implements Component {
 				lines.push(
 					this.theme.fg(
 						"warning",
-						`Compact ${nCompressed} ${nCompressed === 1 ? "entry" : "entries"} into ${nCompressed === 1 ? "a summary" : "summaries"}?`,
+						`  Compact ${nCompressed} ${nCompressed === 1 ? "entry" : "entries"} into ${nCompressed === 1 ? "a summary" : "summaries"}?`,
 					),
 				);
 			}
-			lines.push(this.theme.fg("muted", "y/enter confirm   n back   esc/ctrl+c cancel"));
+			lines.push(this.theme.fg("muted", "  y/enter confirm   n back   esc/ctrl+c cancel"));
 		} else {
-			lines.push(
-				this.theme.fg(
-					"muted",
-					"↑/↓ move   space select/unselect   c compress   d delete   → preview   enter apply   esc/ctrl+c cancel",
-				),
-			);
-			lines.push(this.theme.fg("dim", "preview shows: heading, type, timestamps, tool calls, key facts, retention info"));
+			lines.push(this.helpLine(width));
+			lines.push(this.legendLine());
 		}
-		lines.push("");
+		lines.push(rule);
 
 		const start = this.scrollTop;
 		const end = Math.min(this.units.length, start + this.maxVisible);
+		const showScrollbar = this.units.length > this.maxVisible;
+		const thumb = showScrollbar ? this.scrollbarThumb(this.maxVisible, this.units.length, this.scrollTop) : null;
+
 		for (let i = start; i < end; i++) {
 			const unit = this.units[i];
 			const isCursor = i === this.cursor;
 			const glyph = this.glyphFor(this.effectiveMark(unit.groupId));
-			const tokens = this.theme.fg("dim", `${unit.tokenEstimate}t`);
-			const prefix = isCursor ? this.theme.fg("accent", "❯ ") : "  ";
+			const cursorMark = isCursor ? this.theme.fg("accent", "› ") : "  ";
 			const label = this.labelFor(unit);
 			const text = isCursor ? this.theme.bold(label) : label;
-			lines.push(`${prefix}${glyph} ${text}  ${tokens}`.slice(0, Math.max(10, width)));
+			const tokensText = `${unit.tokenEstimate}t`;
+			const tokensRendered = this.theme.fg("dim", tokensText);
+
+			const scrollCol = showScrollbar ? 2 : 0;
+			const rowWidth = Math.max(10, width) - scrollCol;
+			const leftBudget = Math.max(4, rowWidth - visibleWidth(tokensText) - 2);
+			const leftPart = truncateToWidth(`${cursorMark}${glyph} ${text}`, leftBudget, "…");
+			const gap = Math.max(1, leftBudget - visibleWidth(leftPart) + 1);
+
+			let line = `${leftPart}${" ".repeat(gap)}${tokensRendered}`;
+			line = truncateToWidth(line, rowWidth, "", true);
+			if (isCursor) line = this.theme.bg("selectedBg", line);
+
+			if (showScrollbar && thumb) {
+				const r = i - start;
+				const onThumb = r >= thumb.start && r < thumb.start + thumb.size;
+				line += ` ${this.theme.fg(onThumb ? "accent" : "dim", onThumb ? "█" : "│")}`;
+			}
+			lines.push(line);
 		}
-		lines.push(this.theme.fg("dim", `showing ${start + 1}-${end} of ${this.units.length}`));
+		lines.push(this.statusLine(start, end));
 
 		if (this.previewGroupId) {
 			const unit = this.units.find((u) => u.groupId === this.previewGroupId);
@@ -194,12 +281,14 @@ export class ManageContextView implements Component {
 				const showHScrollbar = maxLineWidth > contentWidth;
 				const hThumb = this.scrollbarThumb(contentWidth, maxLineWidth, scrollLeft);
 
-				const border = this.theme.fg("accent", "│");
-				lines.push(this.theme.fg("accent", `┌─ preview ${"─".repeat(Math.max(0, boxWidth - 12))}┐`));
+				const border = this.theme.fg("borderAccent", "│");
+				const titleText = ` preview — ${oneLine(unit.metadata.heading, Math.max(10, boxWidth - 16))} `;
+				const titleRule = "─".repeat(Math.max(0, boxWidth - 2 - visibleWidth(titleText)));
+				lines.push(this.theme.fg("borderAccent", `┌${titleText}${titleRule}┐`));
 				for (let i = 0; i < viewportHeight; i++) {
 					const raw = visibleLines[i] ?? "";
 					const windowed = sliceByColumn(raw, scrollLeft, contentWidth);
-					const content = this.theme.fg("text", truncateToWidth(windowed, contentWidth, "", true));
+					const content = truncateToWidth(windowed, contentWidth, "", true);
 					const onThumb = showVScrollbar && i >= vThumb.start && i < vThumb.start + vThumb.size;
 					const scrollChar = showVScrollbar ? (onThumb ? "█" : "│") : " ";
 					const scrollColored = this.theme.fg(onThumb ? "accent" : "dim", scrollChar);
@@ -213,16 +302,16 @@ export class ManageContextView implements Component {
 					}
 					lines.push(`${border} ${track} ${this.theme.fg("dim", " ")}${border}`);
 				}
-				lines.push(this.theme.fg("accent", `└${"─".repeat(Math.max(0, boxWidth - 2))}┘`));
+				lines.push(this.theme.fg("borderAccent", `└${"─".repeat(Math.max(0, boxWidth - 2))}┘`));
 
 				const scrollHints: string[] = [];
 				if (showVScrollbar) scrollHints.push("↑/↓ scroll  pgup/pgdn page");
 				if (showHScrollbar) scrollHints.push("→ scroll  home/end jump  ← close");
 				const hint = scrollHints.length > 0 ? `   ${scrollHints.join("   ")}` : "";
 				lines.push(
-					this.theme.fg("dim", `line ${scrollTop + 1}-${scrollTop + viewportHeight} of ${fullLines.length}${hint}`),
+					this.theme.fg("dim", `  line ${scrollTop + 1}-${scrollTop + viewportHeight} of ${fullLines.length}${hint}`),
 				);
-				lines.push(this.theme.fg("dim", "enter/esc/space/ctrl+c/left to close preview   r toggle retention   m toggle mode"));
+				lines.push(this.theme.fg("dim", "  enter/esc/space/ctrl+c/left close   r retention   m mode"));
 			}
 		}
 		return lines;
@@ -232,16 +321,21 @@ export class ManageContextView implements Component {
 		const unit = this.units.find((u) => u.groupId === this.previewGroupId);
 		if (!unit) return [];
 		const compressedText = this.state.marks[unit.groupId]?.compressedText;
-		
+
 		if (compressedText) {
 			return this.renderCompressedPreview(unit, compressedText);
 		}
-		
+
 		if (this.previewMode === "detailed") {
 			return this.renderDetailedPreview(unit);
 		}
-		
+
 		return this.renderEnhancedPreview(unit);
+	}
+
+	/** Section heading used inside the preview: bold label, no framing of its own. */
+	private sectionHeading(label: string): string {
+		return this.theme.bold(this.theme.fg("text", label));
 	}
 
 	/**
@@ -249,88 +343,65 @@ export class ManageContextView implements Component {
 	 */
 	private renderEnhancedPreview(unit: TurnUnit): string[] {
 		const lines: string[] = [];
-		
-		// Header section
-		lines.push(this.theme.fg("accent", `═`.repeat(50)));
-		lines.push(this.theme.fg("accent", `┌─ preview ${unit.metadata.type} ─${"─".repeat(Math.max(0, 44 - unit.metadata.type.length))}┐`));
-		lines.push(this.theme.fg("accent", `│ ${this.theme.bold(unit.metadata.heading)}${" ".repeat(Math.max(0, 44 - unit.metadata.heading.length))}│`));
-		lines.push(this.theme.fg("accent", `│ Time: ${unit.timestamp}${" ".repeat(Math.max(0, 44 - `Time: ${unit.timestamp}`.length))}│`));
-		lines.push(this.theme.fg("accent", `│ Tokens: ${unit.tokenEstimate}${" ".repeat(Math.max(0, 43 - `Tokens: ${unit.tokenEstimate}`.length))}│`));
-		lines.push(this.theme.fg("accent", `│ Importance: ${unit.metadata.importanceScore}/100${" ".repeat(Math.max(0, 37 - `Importance: ${unit.metadata.importanceScore}/100`.length))}│`));
-		lines.push(this.theme.fg("accent", `═`.repeat(50)));
+
+		lines.push(`${this.kindTag(unit)}  ${this.theme.bold(unit.metadata.heading)}`);
+		lines.push(
+			this.theme.fg(
+				"dim",
+				`${unit.timestamp}  ·  ${unit.tokenEstimate} tok  ·  importance ${unit.metadata.importanceScore}/100`,
+			),
+		);
+		lines.push(this.theme.fg("border", "─".repeat(40)));
 		lines.push("");
-		
+
 		// Tool calls section (if applicable)
 		if (unit.metadata.toolCalls && unit.metadata.toolCalls.length > 0) {
-			lines.push(this.theme.fg("accent", "Tool Calls:"));
-			lines.push(this.theme.fg("muted", "─".repeat(20)));
-			
-			unit.metadata.toolCalls.forEach((toolCall, idx) => {
-				lines.push(` ${idx + 1}. ${toolCall.name}`);
-				lines.push(`    Arguments:`);
-				
-				// Format arguments
-				const argLines = JSON.stringify(toolCall.arguments, null, 2).split("\n");
-				argLines.forEach(line => {
-					lines.push(`    ${line}`);
-				});
-				
-				// Show result
-				if (toolCall.result) {
-					lines.push(`    Result: ${toolCall.description || toolCall.result}`);
-				}
-				lines.push("");
-			});
-			
-			lines.push(this.theme.fg("muted", "─".repeat(20)));
+			lines.push(this.sectionHeading("Tool calls"));
+			for (const toolCall of unit.metadata.toolCalls) {
+				lines.push(`  ${this.formatToolCallLine(toolCall)}`);
+			}
 			lines.push("");
 		}
-		
+
 		// Content section
-		lines.push(this.theme.fg("accent", "Content:"));
-		lines.push(this.theme.fg("muted", "─".repeat(20)));
-		const content = unit.metadata.summary;
-		const contentLines = content.split("\n");
-		contentLines.slice(0, 15).forEach(line => {
+		lines.push(this.sectionHeading("Content"));
+		const contentLines = unit.metadata.summary.split("\n");
+		contentLines.slice(0, 15).forEach((line) => {
 			lines.push(this.theme.fg("text", oneLine(line, 80)));
 		});
 		if (contentLines.length > 15) {
-			lines.push(`... (${contentLines.length - 15} more lines)`);
+			lines.push(this.theme.fg("dim", `… ${contentLines.length - 15} more lines`));
 		}
 		lines.push("");
-		
+
 		// Key facts section
 		if (unit.metadata.keyFacts && unit.metadata.keyFacts.length > 0) {
-			lines.push(this.theme.fg("accent", "Key Facts:"));
-			lines.push(this.theme.fg("muted", "─".repeat(20)));
-			unit.metadata.keyFacts.forEach(fact => {
-				lines.push(` • ${fact}`);
+			lines.push(this.sectionHeading("Key facts"));
+			unit.metadata.keyFacts.forEach((fact) => {
+				lines.push(`  ${this.theme.fg("accent", "•")} ${fact}`);
 			});
 			lines.push("");
 		}
-		
+
 		// Retention reason
 		if (unit.metadata.retentionReason) {
-			lines.push(this.theme.fg("accent", "Retention Reason:"));
-			lines.push(this.theme.fg("muted", "─".repeat(20)));
-			lines.push(unit.metadata.retentionReason);
+			lines.push(this.sectionHeading("Retention reason"));
+			lines.push(this.theme.fg("dim", unit.metadata.retentionReason));
 			lines.push("");
 		}
-		
+
 		// Show retention summary when toggle is enabled
 		if (this.showRetentionInfo) {
-			lines.push(this.theme.fg("accent", "═".repeat(50)));
-			lines.push(this.theme.fg("accent", "RETENTION ANALYSIS:"));
-			lines.push(this.theme.fg("muted", "─".repeat(20)));
+			lines.push(this.theme.fg("warning", "─".repeat(40)));
+			lines.push(this.theme.bold(this.theme.fg("warning", "Retention analysis")));
 			const retentionSummary = generateRetentionSummary(unit);
-			const summaryLines = retentionSummary.split("\n");
-			summaryLines.forEach(line => {
+			retentionSummary.split("\n").forEach((line) => {
 				lines.push(this.theme.fg("dim", line));
 			});
 			lines.push("");
-			lines.push(this.theme.fg("dim", "Press 'r' to hide retention analysis"));
+			lines.push(this.theme.fg("dim", "press r to hide retention analysis"));
 		}
-		
+
 		return lines;
 	}
 
@@ -339,78 +410,72 @@ export class ManageContextView implements Component {
 	 */
 	private renderDetailedPreview(unit: TurnUnit): string[] {
 		const lines: string[] = [];
-		
-		// Header
-		lines.push(this.theme.fg("accent", "═".repeat(60)));
-		lines.push(this.theme.fg("accent", "┌─ detailed preview (LLM-optimized) ──────────────────────────┐"));
-		lines.push(this.theme.fg("accent", `│ ${this.theme.bold(unit.metadata.heading)}${" ".repeat(Math.max(0, 58 - unit.metadata.heading.length))}│`));
-		lines.push(this.theme.fg("accent", `│ Type: ${unit.metadata.type}${" ".repeat(Math.max(0, 55 - `Type: ${unit.metadata.type}`.length))}│`));
-		lines.push(this.theme.fg("accent", `│ Time: ${unit.timestamp}${" ".repeat(Math.max(0, 55 - `Time: ${unit.timestamp}`.length))}│`));
-		lines.push(this.theme.fg("accent", `│ Tokens: ${unit.tokenEstimate} | Importance: ${unit.metadata.importanceScore}/100${" ".repeat(Math.max(0, 42 - `Tokens: ${unit.tokenEstimate} | Importance: ${unit.metadata.importanceScore}/100`.length))}│`));
-		lines.push(this.theme.fg("accent", "═".repeat(60)));
+
+		lines.push(`${this.kindTag(unit)}  ${this.theme.bold(unit.metadata.heading)}  ${this.theme.fg("dim", "(detailed)")}`);
+		lines.push(
+			this.theme.fg(
+				"dim",
+				`${unit.metadata.type}  ·  ${unit.timestamp}  ·  ${unit.tokenEstimate} tok  ·  importance ${unit.metadata.importanceScore}/100`,
+			),
+		);
+		lines.push(this.theme.fg("border", "─".repeat(40)));
 		lines.push("");
-		
+
 		// Tool calls (if applicable)
 		if (unit.metadata.toolCalls && unit.metadata.toolCalls.length > 0) {
-			lines.push(this.theme.fg("accent", "TOOL CALLS:"));
-			lines.push(this.theme.fg("muted", "─".repeat(25)));
-			
+			lines.push(this.sectionHeading("Tool calls"));
 			unit.metadata.toolCalls.forEach((toolCall, idx) => {
-				lines.push(`\n${idx + 1}. ${this.theme.bold(toolCall.name)}`);
-				lines.push(`   Arguments: ${JSON.stringify(toolCall.arguments, null, 2)}`);
+				lines.push(`  ${idx + 1}. ${this.formatToolCallLine(toolCall)}`);
+				const argLines = JSON.stringify(toolCall.arguments, null, 2).split("\n");
+				argLines.forEach((line) => lines.push(this.theme.fg("dim", `     ${line}`)));
 				if (toolCall.result) {
-					lines.push(`   Result: ${toolCall.description || toolCall.result}`);
+					lines.push(this.theme.fg("dim", `     → ${oneLine(toolCall.description || toolCall.result, 100)}`));
 				}
 			});
 			lines.push("");
 		}
-		
+
 		// Key facts
 		if (unit.metadata.keyFacts && unit.metadata.keyFacts.length > 0) {
-			lines.push(this.theme.fg("accent", "KEY FACTS:"));
-			lines.push(this.theme.fg("muted", "─".repeat(25)));
-			unit.metadata.keyFacts.forEach(fact => {
-				lines.push(`• ${fact}`);
+			lines.push(this.sectionHeading("Key facts"));
+			unit.metadata.keyFacts.forEach((fact) => {
+				lines.push(`  ${this.theme.fg("accent", "•")} ${fact}`);
 			});
 			lines.push("");
 		}
-		
+
 		// Content
-		lines.push(this.theme.fg("accent", "CONTENT:"));
-		lines.push(this.theme.fg("muted", "─".repeat(25)));
+		lines.push(this.sectionHeading("Content"));
 		const contentLines = unit.metadata.summary.split("\n");
-		contentLines.slice(0, 20).forEach(line => {
+		contentLines.slice(0, 20).forEach((line) => {
 			lines.push(this.theme.fg("text", oneLine(line, 80)));
 		});
 		if (contentLines.length > 20) {
-			lines.push(`... (${contentLines.length - 20} more lines)`);
+			lines.push(this.theme.fg("dim", `… ${contentLines.length - 20} more lines`));
 		}
 		lines.push("");
-		
+
 		// Retention reason
 		if (unit.metadata.retentionReason) {
-			lines.push(this.theme.fg("accent", "RETENTION REASON:"));
-			lines.push(this.theme.fg("muted", "─".repeat(25)));
-			lines.push(unit.metadata.retentionReason);
+			lines.push(this.sectionHeading("Retention reason"));
+			lines.push(this.theme.fg("dim", unit.metadata.retentionReason));
 			lines.push("");
 		}
-		
+
 		// Retention summary
 		if (this.showRetentionInfo) {
-			lines.push(this.theme.fg("accent", "═".repeat(60)));
-			lines.push(this.theme.fg("accent", "RETENTION ANALYSIS:"));
-			lines.push(this.theme.fg("muted", "─".repeat(25)));
+			lines.push(this.theme.fg("warning", "─".repeat(40)));
+			lines.push(this.theme.bold(this.theme.fg("warning", "Retention analysis")));
 			const retentionSummary = generateRetentionSummary(unit);
-			const summaryLines = retentionSummary.split("\n");
-			summaryLines.forEach(line => {
+			retentionSummary.split("\n").forEach((line) => {
 				lines.push(this.theme.fg("dim", line));
 			});
 			lines.push("");
-			lines.push(this.theme.fg("dim", "Press 'r' to hide retention analysis"));
+			lines.push(this.theme.fg("dim", "press r to hide retention analysis"));
 		}
-		
-		lines.push(this.theme.fg("dim", "Press 'm' to switch to compact view   enter/esc/space/ctrl+c to close"));
-		
+
+		lines.push(this.theme.fg("dim", "press m to switch to compact view"));
+
 		return lines;
 	}
 
@@ -419,23 +484,25 @@ export class ManageContextView implements Component {
 	 */
 	private renderCompressedPreview(unit: TurnUnit, compressedText: string): string[] {
 		const lines: string[] = [];
-		lines.push(this.theme.fg("accent", `═`.repeat(50)));
-		lines.push(this.theme.fg("accent", `┌─ compressed entry ─${"─".repeat(33)}┐`));
-		lines.push(this.theme.fg("accent", `│ ${this.theme.bold(unit.metadata.heading)}${" ".repeat(Math.max(0, 44 - unit.metadata.heading.length))}│`));
-		lines.push(this.theme.fg("accent", `│ Compressed: ${unit.tokenEstimate} → ~${unit.metadata.importanceScore} tok${" ".repeat(Math.max(0, 30 - `Compressed: ${unit.tokenEstimate} → ~${unit.metadata.importanceScore} tok`.length))}│`));
-		lines.push(this.theme.fg("accent", `═`.repeat(50)));
+		const info = this.state.marks[unit.groupId];
+		const from = info?.originalTokenEstimate ?? unit.tokenEstimate;
+		const to = info?.compressedTokenEstimate ?? "?";
+
+		lines.push(`${this.glyphFor("compressed")}  ${this.theme.bold(unit.metadata.heading)}`);
+		lines.push(this.theme.fg("dim", `compressed  ·  ${from} → ${to} tok`));
+		lines.push(this.theme.fg("warning", "─".repeat(40)));
 		lines.push("");
-		
+
 		// Show compressed content
 		const contentLines = compressedText.split("\n");
-		contentLines.slice(0, 20).forEach(line => {
+		contentLines.slice(0, 20).forEach((line) => {
 			lines.push(this.theme.fg("text", oneLine(line, 80)));
 		});
 		if (contentLines.length > 20) {
-			lines.push(`... (${contentLines.length - 20} more lines)`);
+			lines.push(this.theme.fg("dim", `… ${contentLines.length - 20} more lines`));
 		}
 		lines.push("");
-		
+
 		return lines;
 	}
 
@@ -450,26 +517,29 @@ export class ManageContextView implements Component {
 
 	private renderProcessing(width: number): string[] {
 		const lines: string[] = [];
-		lines.push(this.theme.bold(this.theme.fg("accent", "Applying changes")));
+		lines.push(this.rule(width));
+		lines.push(`  ${this.theme.bold(this.theme.fg("accent", "Applying changes"))}`);
+		lines.push("");
 		const barWidth = Math.max(10, Math.min(40, width - 10));
 		const filled =
 			this.progressTotal === 0 ? barWidth : Math.round((this.progressDone / this.progressTotal) * barWidth);
-		const bar = "█".repeat(filled) + "░".repeat(Math.max(0, barWidth - filled));
-		lines.push(`[${bar}] ${this.progressDone}/${this.progressTotal}`);
+		const bar =
+			this.theme.fg("accent", "█".repeat(filled)) + this.theme.fg("dim", "░".repeat(Math.max(0, barWidth - filled)));
+		lines.push(`  [${bar}] ${this.theme.fg("muted", `${this.progressDone}/${this.progressTotal}`)}`);
 		lines.push("");
 		for (const entry of this.log.slice(-15)) {
 			const color = entry.kind === "ok" ? "success" : entry.kind === "error" ? "error" : "muted";
-			lines.push(this.theme.fg(color, entry.text));
+			lines.push(`  ${this.theme.fg(color, entry.text)}`);
 		}
 		if (this.progressDone >= this.progressTotal) {
 			lines.push("");
-			lines.push(this.theme.fg("dim", "done — closing…"));
+			lines.push(this.theme.fg("dim", "  done — closing…"));
 		} else if (this.cancelled) {
 			lines.push("");
-			lines.push(this.theme.fg("dim", "cancelling…"));
+			lines.push(this.theme.fg("dim", "  cancelling…"));
 		} else {
 			lines.push("");
-			lines.push(this.theme.fg("dim", "esc to cancel"));
+			lines.push(this.theme.fg("dim", "  esc to cancel"));
 		}
 		return lines;
 	}
