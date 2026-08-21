@@ -30,7 +30,7 @@ export class ManageContextView implements Component {
 	// Cached from the last render() call so handleInput (which gets no width)
 	// can clamp/step horizontal scroll against the actual box content width.
 	private previewContentWidth = 40;
-	private readonly previewMaxVisible = 20;
+	private readonly previewMaxVisible = 30;
 	private readonly previewHScrollStep = 4;
 	private showRetentionInfo = false; // Toggle to show retention information in preview
 	private previewMode: "compact" | "detailed" = "compact"; // Toggle between compact and detailed view
@@ -217,12 +217,12 @@ export class ManageContextView implements Component {
 
 				const scrollHints: string[] = [];
 				if (showVScrollbar) scrollHints.push("↑/↓ scroll  pgup/pgdn page");
-				if (showHScrollbar) scrollHints.push("←/→ scroll  home/end jump");
+				if (showHScrollbar) scrollHints.push("→ scroll  home/end jump  ← close");
 				const hint = scrollHints.length > 0 ? `   ${scrollHints.join("   ")}` : "";
 				lines.push(
 					this.theme.fg("dim", `line ${scrollTop + 1}-${scrollTop + viewportHeight} of ${fullLines.length}${hint}`),
 				);
-				lines.push(this.theme.fg("dim", "enter/esc/space/ctrl+c to close preview   r toggle retention   m toggle mode"));
+				lines.push(this.theme.fg("dim", "enter/esc/space/ctrl+c/left to close preview   r toggle retention   m toggle mode"));
 			}
 		}
 		return lines;
@@ -291,11 +291,11 @@ export class ManageContextView implements Component {
 		lines.push(this.theme.fg("muted", "─".repeat(20)));
 		const content = unit.metadata.summary;
 		const contentLines = content.split("\n");
-		contentLines.slice(0, 10).forEach(line => {
-			lines.push(this.theme.fg("text", oneLine(line, 45)));
+		contentLines.slice(0, 15).forEach(line => {
+			lines.push(this.theme.fg("text", oneLine(line, 80)));
 		});
-		if (contentLines.length > 10) {
-			lines.push(`... (${contentLines.length - 10} more lines)`);
+		if (contentLines.length > 15) {
+			lines.push(`... (${contentLines.length - 15} more lines)`);
 		}
 		lines.push("");
 		
@@ -379,11 +379,11 @@ export class ManageContextView implements Component {
 		lines.push(this.theme.fg("accent", "CONTENT:"));
 		lines.push(this.theme.fg("muted", "─".repeat(25)));
 		const contentLines = unit.metadata.summary.split("\n");
-		contentLines.slice(0, 15).forEach(line => {
-			lines.push(this.theme.fg("text", oneLine(line, 55)));
+		contentLines.slice(0, 20).forEach(line => {
+			lines.push(this.theme.fg("text", oneLine(line, 80)));
 		});
-		if (contentLines.length > 15) {
-			lines.push(`... (${contentLines.length - 15} more lines)`);
+		if (contentLines.length > 20) {
+			lines.push(`... (${contentLines.length - 20} more lines)`);
 		}
 		lines.push("");
 		
@@ -428,11 +428,11 @@ export class ManageContextView implements Component {
 		
 		// Show compressed content
 		const contentLines = compressedText.split("\n");
-		contentLines.slice(0, 15).forEach(line => {
-			lines.push(this.theme.fg("text", oneLine(line, 45)));
+		contentLines.slice(0, 20).forEach(line => {
+			lines.push(this.theme.fg("text", oneLine(line, 80)));
 		});
-		if (contentLines.length > 15) {
-			lines.push(`... (${contentLines.length - 15} more lines)`);
+		if (contentLines.length > 20) {
+			lines.push(`... (${contentLines.length - 20} more lines)`);
 		}
 		lines.push("");
 		
@@ -510,9 +510,10 @@ export class ManageContextView implements Component {
 					this.previewScrollTop = Math.max(0, this.previewScrollTop - viewportHeight);
 				else if (matchesKey(data, "pageDown"))
 					this.previewScrollTop = Math.min(maxScrollTop, this.previewScrollTop + viewportHeight);
-				else if (matchesKey(data, "left"))
-					this.previewScrollLeft = Math.max(0, this.previewScrollLeft - this.previewHScrollStep);
-				else if (matchesKey(data, "right"))
+				else if (matchesKey(data, "left")) {
+					// Close preview on left arrow
+					this.previewGroupId = null;
+				} else if (matchesKey(data, "right"))
 					this.previewScrollLeft = Math.min(maxScrollLeft, this.previewScrollLeft + this.previewHScrollStep);
 				else if (matchesKey(data, "home")) this.previewScrollLeft = 0;
 				else if (matchesKey(data, "end")) this.previewScrollLeft = maxScrollLeft;

@@ -67,7 +67,7 @@ export function hasToolCalls(entry: SessionEntry): entry is SessionMessageEntry 
 	);
 }
 
-export function oneLine(text: string, maxLen = 100): string {
+export function oneLine(text: string, maxLen = 200): string {
 	const flat = text.replace(/\s+/g, " ").trim();
 	return flat.length > maxLen ? `${flat.slice(0, maxLen - 1)}…` : flat || "(empty)";
 }
