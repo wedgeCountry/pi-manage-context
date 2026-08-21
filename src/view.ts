@@ -22,6 +22,101 @@ interface LogLine {
 /** One entry from `TurnUnitMetadata.toolCalls` — kept local since it's only used for display formatting. */
 type ToolCallInfo = NonNullable<TurnUnitMetadata["toolCalls"]>[number];
 
+/**
+ * Every numeric layout/sizing knob the view uses, pulled out of the render
+ * methods so callers can retune the picker (terminal real estate, preview
+ * verbosity, truncation lengths, …) without editing this file. Construct
+ * with `{ ...defaultManageContextViewConfig, ...overrides }` — see
+ * `ManageContextView`'s constructor, which does exactly that when no full
+ * config is supplied.
+ */
+export interface ManageContextViewConfig {
+	/** Floor on visible list rows, even in a very short terminal. */
+	minListRows: number;
+	/** Terminal rows reserved for chrome when computing the constructor's fallback row budget (before the first render). */
+	initialHeightReserve: number;
+	/** Floor on how many rows the list keeps once the preview pane is open and splitting the remainder. */
+	minListBudgetWithPreview: number;
+	/** Fraction of the remaining rows given to the list (vs. the preview pane) once the preview is open. */
+	listPreviewSplitRatio: number;
+	/** Terminal rows reserved for the preview box's own border/hint chrome. */
+	previewChromeRows: number;
+	/** Floor on the preview box's content width. */
+	minPreviewContentWidth: number;
+	/** Columns reserved for the preview box's border/scrollbar chrome, subtracted from box width to get content width. */
+	previewBoxChromeCols: number;
+	/** Floor on the preview title's available width. */
+	minPreviewTitleWidth: number;
+	/** Columns reserved when truncating the preview title so it never crowds out the border. */
+	previewTitleReserveCols: number;
+	/** Columns scrolled per horizontal-scroll keypress in the preview pane. */
+	previewHScrollStep: number;
+	/** Max content lines shown before "… N more lines" in the compact preview. */
+	compactContentLineLimit: number;
+	/** Max content lines shown before "… N more lines" in the detailed/compressed preview. */
+	detailedContentLineLimit: number;
+	/** Max characters per rendered content line before truncation. */
+	contentLineMaxWidth: number;
+	/** Max characters for a summarized tool-call argument string. */
+	toolArgsMaxWidth: number;
+	/** Max characters for a tool-call result summary line (detailed preview). */
+	toolResultMaxWidth: number;
+	/** Width of the "───" section rules drawn inside the preview pane. */
+	sectionRuleWidth: number;
+	/** Floor on the processing view's progress bar width. */
+	progressBarMinWidth: number;
+	/** Ceiling on the processing view's progress bar width. */
+	progressBarMaxWidth: number;
+	/** Columns reserved around the progress bar, subtracted from terminal width. */
+	progressBarWidthReserve: number;
+	/** Floor on how many log rows the processing view shows. */
+	minProcessingLogRows: number;
+	/** Terminal rows reserved for chrome in the processing view, subtracted from rows to get the log row budget. */
+	processingChromeRows: number;
+	/** Max characters for a unit-preview string in the processing log. */
+	logPreviewMaxWidth: number;
+	/** Floor on a list row's usable width. */
+	minRowWidth: number;
+	/** Floor on the space reserved for a list row's label before the token count. */
+	minRowLeftBudget: number;
+	/** Columns reserved between a list row's label and its token count. */
+	rowTokenGap: number;
+	/** Floor on the preview box's total width. */
+	minPreviewBoxWidth: number;
+	/** Indent width used when pretty-printing tool-call arguments in the detailed preview. */
+	toolArgsJsonIndent: number;
+}
+
+export const defaultManageContextViewConfig: ManageContextViewConfig = {
+	minListRows: 5,
+	initialHeightReserve: 8,
+	minListBudgetWithPreview: 3,
+	listPreviewSplitRatio: 0.45,
+	previewChromeRows: 6,
+	minPreviewContentWidth: 4,
+	previewBoxChromeCols: 5,
+	minPreviewTitleWidth: 10,
+	previewTitleReserveCols: 16,
+	previewHScrollStep: 4,
+	compactContentLineLimit: 15,
+	detailedContentLineLimit: 20,
+	contentLineMaxWidth: 160,
+	toolArgsMaxWidth: 100,
+	toolResultMaxWidth: 200,
+	sectionRuleWidth: 40,
+	progressBarMinWidth: 10,
+	progressBarMaxWidth: 40,
+	progressBarWidthReserve: 10,
+	minProcessingLogRows: 3,
+	processingChromeRows: 8,
+	logPreviewMaxWidth: 120,
+	minRowWidth: 40,
+	minRowLeftBudget: 4,
+	rowTokenGap: 2,
+	minPreviewBoxWidth: 60,
+	toolArgsJsonIndent: 2,
+};
+
 export class ManageContextView implements Component {
 	private phase: "editing" | "confirm" | "processing" | "analyzing" = "editing";
 	private cursor = 0;
@@ -36,10 +131,9 @@ export class ManageContextView implements Component {
 	private previewScrollLeft = 0;
 	// Cached from the last render() call so handleInput (which gets no width)
 	// can clamp/step horizontal scroll against the actual box content width.
-	private previewContentWidth = 40;
+	private previewContentWidth: number;
 	// Also recomputed each render(), same reasoning as maxVisible above.
 	private previewMaxVisible = 20;
-	private readonly previewHScrollStep = 4;
 	private showRetentionInfo = false; // Toggle to show retention information in preview
 	private previewMode: "compact" | "detailed" = "compact"; // Toggle between compact and detailed view
 
@@ -50,6 +144,8 @@ export class ManageContextView implements Component {
 	private cancelled = false;
 	private abortController = new AbortController();
 
+	private readonly config: ManageContextViewConfig;
+
 	constructor(
 		private readonly tui: TUI,
 		private readonly theme: Theme,
@@ -58,8 +154,12 @@ export class ManageContextView implements Component {
 		private readonly ctx: ExtensionCommandContext,
 		private readonly pi: ExtensionAPI,
 		private readonly done: (result: void) => void,
+		config?: Partial<ManageContextViewConfig>,
 	) {
-		this.maxVisible = Math.max(5, Math.min(units.length, Math.max(5, tui.terminal.rows - 8)));
+		this.config = { ...defaultManageContextViewConfig, ...config };
+		this.previewContentWidth = this.config.sectionRuleWidth;
+		const minRows = this.config.minListRows;
+		this.maxVisible = Math.max(minRows, Math.min(units.length, Math.max(minRows, tui.terminal.rows - this.config.initialHeightReserve)));
 	}
 
 	invalidate(): void {}
@@ -121,10 +221,10 @@ export class ManageContextView implements Component {
 	private summarizeToolArgs(name: string, args: Record<string, unknown>): string {
 		const path = args.path ?? args.file_path;
 		if (typeof path === "string" && (name === "read" || name === "write" || name === "edit" || name === "ls")) return path;
-		if (name === "bash" && typeof args.command === "string") return oneLine(String(args.command), 50);
+		if (name === "bash" && typeof args.command === "string") return oneLine(String(args.command), this.config.toolArgsMaxWidth);
 		if (name === "grep" && typeof args.pattern === "string") return `/${args.pattern}/`;
 		try {
-			return oneLine(JSON.stringify(args), 50);
+			return oneLine(JSON.stringify(args), this.config.toolArgsMaxWidth);
 		} catch {
 			return "";
 		}
@@ -233,8 +333,13 @@ export class ManageContextView implements Component {
 		const availableRows = Math.max(1, this.tui.terminal.rows);
 		const chromeSoFar = lines.length + 1; // + statusLine pushed below
 		const remaining = Math.max(0, availableRows - chromeSoFar - 1);
-		const listBudget = this.previewGroupId ? Math.max(3, Math.floor(remaining * 0.45)) : remaining;
-		this.maxVisible = Math.max(Math.min(5, this.units.length), Math.min(this.units.length, listBudget));
+		const listBudget = this.previewGroupId
+			? Math.max(this.config.minListBudgetWithPreview, Math.floor(remaining * this.config.listPreviewSplitRatio))
+			: remaining;
+		this.maxVisible = Math.max(
+			Math.min(this.config.minListRows, this.units.length),
+			Math.min(this.units.length, listBudget),
+		);
 
 		const start = this.scrollTop;
 		const end = Math.min(this.units.length, start + this.maxVisible);
@@ -252,8 +357,8 @@ export class ManageContextView implements Component {
 			const tokensRendered = this.theme.fg("dim", tokensText);
 
 			const scrollCol = showScrollbar ? 2 : 0;
-			const rowWidth = Math.max(10, width) - scrollCol;
-			const leftBudget = Math.max(4, rowWidth - visibleWidth(tokensText) - 2);
+			const rowWidth = Math.max(this.config.minRowWidth, width) - scrollCol;
+			const leftBudget = Math.max(this.config.minRowLeftBudget, rowWidth - visibleWidth(tokensText) - this.config.rowTokenGap);
 			const leftPart = truncateToWidth(`${cursorMark}${glyph} ${text}`, leftBudget, "…");
 			const gap = Math.max(1, leftBudget - visibleWidth(leftPart) + 1);
 
@@ -279,15 +384,20 @@ export class ManageContextView implements Component {
 				// text flowing at the outer TUI width) so the scrollbar has a
 				// track to sit in that clearly belongs to the preview, not the
 				// picker around it.
-				const boxWidth = Math.max(20, width);
-				const contentWidth = Math.max(4, boxWidth - 5); // "│ " + content + " " + scrollbar col + "│"
+				const boxWidth = Math.max(this.config.minPreviewBoxWidth, width);
+				// "│ " + content + " " + scrollbar col + "│"
+				const contentWidth = Math.max(this.config.minPreviewContentWidth, boxWidth - this.config.previewBoxChromeCols);
 				this.previewContentWidth = contentWidth;
 
 				// Same idea as the list above: whatever terminal rows remain
 				// after the header, list, footer, and this box's own
 				// border/hint chrome go to the preview's visible line count.
-				const previewChrome = 6; // blank + top border + bottom border + line-info hint + close hint + slack
-				this.previewMaxVisible = Math.max(3, this.tui.terminal.rows - lines.length - previewChrome);
+				// blank + top border + bottom border + line-info hint + close hint + slack
+				const previewChrome = this.config.previewChromeRows;
+				this.previewMaxVisible = Math.max(
+					this.config.minListBudgetWithPreview,
+					this.tui.terminal.rows - lines.length - previewChrome,
+				);
 
 				const fullLines = this.previewLines();
 				const viewportHeight = Math.max(1, Math.min(this.previewMaxVisible, fullLines.length));
@@ -304,7 +414,7 @@ export class ManageContextView implements Component {
 				const hThumb = this.scrollbarThumb(contentWidth, maxLineWidth, scrollLeft);
 
 				const border = this.theme.fg("borderAccent", "│");
-				const titleText = ` preview — ${oneLine(unit.metadata.heading, Math.max(10, boxWidth - 16))} `;
+				const titleText = ` preview — ${oneLine(unit.metadata.heading, Math.max(this.config.minPreviewTitleWidth, boxWidth - this.config.previewTitleReserveCols))} `;
 				const titleRule = "─".repeat(Math.max(0, boxWidth - 2 - visibleWidth(titleText)));
 				lines.push(this.theme.fg("borderAccent", `┌${titleText}${titleRule}┐`));
 				for (let i = 0; i < viewportHeight; i++) {
@@ -373,7 +483,7 @@ export class ManageContextView implements Component {
 				`${unit.timestamp}  ·  ${unit.tokenEstimate} tok  ·  importance ${unit.metadata.importanceScore}/100`,
 			),
 		);
-		lines.push(this.theme.fg("border", "─".repeat(40)));
+		lines.push(this.theme.fg("border", "─".repeat(this.config.sectionRuleWidth)));
 		lines.push("");
 
 		// Tool calls section (if applicable)
@@ -388,11 +498,12 @@ export class ManageContextView implements Component {
 		// Content section
 		lines.push(this.sectionHeading("Content"));
 		const contentLines = unit.metadata.summary.split("\n");
-		contentLines.slice(0, 15).forEach((line) => {
-			lines.push(this.theme.fg("text", oneLine(line, 80)));
+		const contentLimit = this.config.compactContentLineLimit;
+		contentLines.slice(0, contentLimit).forEach((line) => {
+			lines.push(this.theme.fg("text", oneLine(line, this.config.contentLineMaxWidth)));
 		});
-		if (contentLines.length > 15) {
-			lines.push(this.theme.fg("dim", `… ${contentLines.length - 15} more lines`));
+		if (contentLines.length > contentLimit) {
+			lines.push(this.theme.fg("dim", `… ${contentLines.length - contentLimit} more lines`));
 		}
 		lines.push("");
 
@@ -414,7 +525,7 @@ export class ManageContextView implements Component {
 
 		// Show retention summary when toggle is enabled
 		if (this.showRetentionInfo) {
-			lines.push(this.theme.fg("warning", "─".repeat(40)));
+			lines.push(this.theme.fg("warning", "─".repeat(this.config.sectionRuleWidth)));
 			lines.push(this.theme.bold(this.theme.fg("warning", "Retention analysis")));
 			const retentionSummary = generateRetentionSummary(unit);
 			retentionSummary.split("\n").forEach((line) => {
@@ -440,7 +551,7 @@ export class ManageContextView implements Component {
 				`${unit.metadata.type}  ·  ${unit.timestamp}  ·  ${unit.tokenEstimate} tok  ·  importance ${unit.metadata.importanceScore}/100`,
 			),
 		);
-		lines.push(this.theme.fg("border", "─".repeat(40)));
+		lines.push(this.theme.fg("border", "─".repeat(this.config.sectionRuleWidth)));
 		lines.push("");
 
 		// Tool calls (if applicable)
@@ -448,10 +559,12 @@ export class ManageContextView implements Component {
 			lines.push(this.sectionHeading("Tool calls"));
 			unit.metadata.toolCalls.forEach((toolCall, idx) => {
 				lines.push(`  ${idx + 1}. ${this.formatToolCallLine(toolCall)}`);
-				const argLines = JSON.stringify(toolCall.arguments, null, 2).split("\n");
+				const argLines = JSON.stringify(toolCall.arguments, null, this.config.toolArgsJsonIndent).split("\n");
 				argLines.forEach((line) => lines.push(this.theme.fg("dim", `     ${line}`)));
 				if (toolCall.result) {
-					lines.push(this.theme.fg("dim", `     → ${oneLine(toolCall.description || toolCall.result, 100)}`));
+					lines.push(
+						this.theme.fg("dim", `     → ${oneLine(toolCall.description || toolCall.result, this.config.toolResultMaxWidth)}`),
+					);
 				}
 			});
 			lines.push("");
@@ -469,11 +582,12 @@ export class ManageContextView implements Component {
 		// Content
 		lines.push(this.sectionHeading("Content"));
 		const contentLines = unit.metadata.summary.split("\n");
-		contentLines.slice(0, 20).forEach((line) => {
-			lines.push(this.theme.fg("text", oneLine(line, 80)));
+		const contentLimit = this.config.detailedContentLineLimit;
+		contentLines.slice(0, contentLimit).forEach((line) => {
+			lines.push(this.theme.fg("text", oneLine(line, this.config.contentLineMaxWidth)));
 		});
-		if (contentLines.length > 20) {
-			lines.push(this.theme.fg("dim", `… ${contentLines.length - 20} more lines`));
+		if (contentLines.length > contentLimit) {
+			lines.push(this.theme.fg("dim", `… ${contentLines.length - contentLimit} more lines`));
 		}
 		lines.push("");
 
@@ -486,7 +600,7 @@ export class ManageContextView implements Component {
 
 		// Retention summary
 		if (this.showRetentionInfo) {
-			lines.push(this.theme.fg("warning", "─".repeat(40)));
+			lines.push(this.theme.fg("warning", "─".repeat(this.config.sectionRuleWidth)));
 			lines.push(this.theme.bold(this.theme.fg("warning", "Retention analysis")));
 			const retentionSummary = generateRetentionSummary(unit);
 			retentionSummary.split("\n").forEach((line) => {
@@ -512,16 +626,17 @@ export class ManageContextView implements Component {
 
 		lines.push(`${this.glyphFor("compressed")}  ${this.theme.bold(unit.metadata.heading)}`);
 		lines.push(this.theme.fg("dim", `compressed  ·  ${from} → ${to} tok`));
-		lines.push(this.theme.fg("warning", "─".repeat(40)));
+		lines.push(this.theme.fg("warning", "─".repeat(this.config.sectionRuleWidth)));
 		lines.push("");
 
 		// Show compressed content
 		const contentLines = compressedText.split("\n");
-		contentLines.slice(0, 20).forEach((line) => {
-			lines.push(this.theme.fg("text", oneLine(line, 80)));
+		const contentLimit = this.config.detailedContentLineLimit;
+		contentLines.slice(0, contentLimit).forEach((line) => {
+			lines.push(this.theme.fg("text", oneLine(line, this.config.contentLineMaxWidth)));
 		});
-		if (contentLines.length > 20) {
-			lines.push(this.theme.fg("dim", `… ${contentLines.length - 20} more lines`));
+		if (contentLines.length > contentLimit) {
+			lines.push(this.theme.fg("dim", `… ${contentLines.length - contentLimit} more lines`));
 		}
 		lines.push("");
 
@@ -542,14 +657,17 @@ export class ManageContextView implements Component {
 		lines.push(this.rule(width));
 		lines.push(`  ${this.theme.bold(this.theme.fg("accent", "Applying changes"))}`);
 		lines.push("");
-		const barWidth = Math.max(10, Math.min(40, width - 10));
+		const barWidth = Math.max(
+			this.config.progressBarMinWidth,
+			Math.min(this.config.progressBarMaxWidth, width - this.config.progressBarWidthReserve),
+		);
 		const filled =
 			this.progressTotal === 0 ? barWidth : Math.round((this.progressDone / this.progressTotal) * barWidth);
 		const bar =
 			this.theme.fg("accent", "█".repeat(filled)) + this.theme.fg("dim", "░".repeat(Math.max(0, barWidth - filled)));
 		lines.push(`  [${bar}] ${this.theme.fg("muted", `${this.progressDone}/${this.progressTotal}`)}`);
 		lines.push("");
-		const logRows = Math.max(3, this.tui.terminal.rows - 8);
+		const logRows = Math.max(this.config.minProcessingLogRows, this.tui.terminal.rows - this.config.processingChromeRows);
 		for (const entry of this.log.slice(-logRows)) {
 			const color = entry.kind === "ok" ? "success" : entry.kind === "error" ? "error" : "muted";
 			lines.push(`  ${this.theme.fg(color, entry.text)}`);
@@ -607,7 +725,7 @@ export class ManageContextView implements Component {
 					// Close preview on left arrow
 					this.previewGroupId = null;
 				} else if (matchesKey(data, "right"))
-					this.previewScrollLeft = Math.min(maxScrollLeft, this.previewScrollLeft + this.previewHScrollStep);
+					this.previewScrollLeft = Math.min(maxScrollLeft, this.previewScrollLeft + this.config.previewHScrollStep);
 				else if (matchesKey(data, "home")) this.previewScrollLeft = 0;
 				else if (matchesKey(data, "end")) this.previewScrollLeft = maxScrollLeft;
 			}
@@ -709,15 +827,15 @@ export class ManageContextView implements Component {
 				info.compressedTokenEstimate = Math.ceil(compressedText.length / 4);
 				this.state.marks[unit.groupId] = info;
 				this.log.push({
-					text: `✓ ${oneLine(unit.preview, 60)} — ${unit.tokenEstimate} → ~${info.compressedTokenEstimate} tok`,
+					text: `✓ ${oneLine(unit.preview, this.config.logPreviewMaxWidth)} — ${unit.tokenEstimate} → ~${info.compressedTokenEstimate} tok`,
 					kind: "ok",
 				});
 			} catch (err) {
 				if (this.cancelled) {
-					this.log.push({ text: `– ${oneLine(unit.preview, 60)} — cancelled`, kind: "info" });
+					this.log.push({ text: `– ${oneLine(unit.preview, this.config.logPreviewMaxWidth)} — cancelled`, kind: "info" });
 				} else {
 					const message = err instanceof Error ? err.message : String(err);
-					this.log.push({ text: `✕ ${oneLine(unit.preview, 60)} — ${message}`, kind: "error" });
+					this.log.push({ text: `✕ ${oneLine(unit.preview, this.config.logPreviewMaxWidth)} — ${message}`, kind: "error" });
 				}
 				// leave the mark as-is (still "compressed" but with no
 				// compressedText); buildFilteredMessages() falls back to the

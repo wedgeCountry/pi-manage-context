@@ -174,7 +174,10 @@ export default function (pi: ExtensionAPI): void {
 
 			await ctx.ui.custom<void>(
 				(tui, theme, _kb: KeybindingsManager, done) => new ManageContextView(tui, theme, units, state, ctx, pi, done),
-				{ overlay: true },
+				// pi-tui defaults an overlay's width to min(80, availWidth) when no
+				// width is given, which clips this picker to 80 columns on wide
+				// terminals. Claim most of the terminal instead.
+				{ overlay: true, overlayOptions: { width: "95%", minWidth: 60 } },
 			);
 		},
 	});
