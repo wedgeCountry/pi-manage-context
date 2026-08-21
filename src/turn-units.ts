@@ -73,6 +73,19 @@ export function oneLine(text: string, maxLen = 200): string {
 }
 
 /**
+ * Like oneLine(), but keeps line breaks intact — for metadata.summary, whose
+ * consumers (the preview panes, markdown export) split on "\n" to render
+ * multi-line content. oneLine() would collapse those breaks into spaces
+ * before anyone got a chance to split on them.
+ */
+export function preserveLineBreaks(text: string, maxLen = 4000): string {
+	// Normalize line endings and drop trailing whitespace per line, but leave
+	// the breaks themselves alone.
+	const normalized = text.replace(/\r\n/g, "\n").trim();
+	return normalized.length > maxLen ? `${normalized.slice(0, maxLen - 1)}…` : normalized || "(empty)";
+}
+
+/**
  * Extract tool call arguments for display and LLM analysis.
  */
 export function extractToolArguments(argumentsJson: unknown): Record<string, unknown> {
@@ -349,14 +362,14 @@ export function buildTurnUnits(entries: SessionEntry[]): TurnUnit[] {
 					heading,
 					type: kind === "user" ? "user_message" : "assistant_response",
 					timestamp: entry.timestamp,
-					summary: oneLine(text, 200),
+					summary: preserveLineBreaks(text),
 					keyFacts,
 					importanceScore,
 					retentionReason: generateRetentionReason(kind, text, {
 						heading,
 						type: kind === "user" ? "user_message" : "assistant_response",
 						timestamp: entry.timestamp,
-						summary: oneLine(text, 200),
+						summary: preserveLineBreaks(text),
 						keyFacts,
 						importanceScore,
 					}),
@@ -387,14 +400,14 @@ export function buildTurnUnits(entries: SessionEntry[]): TurnUnit[] {
 					heading,
 					type: `custom_${entry.customType}`,
 					timestamp: entry.timestamp,
-					summary: oneLine(text, 200),
+					summary: preserveLineBreaks(text),
 					keyFacts,
 					importanceScore,
 					retentionReason: generateRetentionReason("custom_message", text, {
 						heading,
 						type: `custom_${entry.customType}`,
 						timestamp: entry.timestamp,
-						summary: oneLine(text, 200),
+						summary: preserveLineBreaks(text),
 						keyFacts,
 						importanceScore,
 					}),
