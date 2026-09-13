@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext, SessionEntry, SessionMessageEntry } from "@earendil-works/pi-coding-agent";
 import type { UserMessage, AssistantMessage } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
-import { buildManageContextSelectTool } from "../src/agent-select-tool.ts";
+import { buildManageContextSelectTool } from "../src/tools/manage-context.ts";
 import type { LLMMemoryEntry } from "../src/llm-export.ts";
 
 function userEntry(id: string, text: string): SessionMessageEntry {

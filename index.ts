@@ -50,8 +50,8 @@ import { buildFilteredMessages } from "./src/context-filter.ts";
 import { loadState, saveState } from "./src/state.ts";
 import { buildTurnUnits, type TurnUnit } from "./src/turn-units.ts";
 import { ManageContextView } from "./src/view.ts";
-import { buildManageContextSelectTool, buildManageContextTool } from "./src/agent-select-tool.ts";
-import { buildViewContextTool } from "./src/view-context-tool.ts";
+import { registerManageContextSelectTool, registerManageContextTool } from "./src/tools/manage-context.ts";
+import { registerViewContextTool } from "./src/tools/view-context.ts";
 
 /**
  * True if `unit` is an assistant turn whose *only* tool call is a read() on
@@ -119,9 +119,9 @@ export default function (pi: ExtensionAPI): void {
 		if (changed) saveState(pi, state);
 	});
 
-	pi.registerTool(buildManageContextSelectTool(pi));
-	pi.registerTool(buildManageContextTool(pi));
-	pi.registerTool(buildViewContextTool());
+	registerManageContextSelectTool(pi);
+	registerManageContextTool(pi);
+	registerViewContextTool(pi);
 
 	pi.registerCommand("manage_context", {
 		description: "Review, select, compress, or delete messages from the model's context",

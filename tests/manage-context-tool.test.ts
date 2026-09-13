@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { buildManageContextTool, buildManageContextSelectTool } from "../src/agent-select-tool.ts";
+import { buildManageContextTool, buildManageContextSelectTool } from "../src/tools/manage-context.ts";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 
@@ -122,11 +122,12 @@ describe("manage-context tool", () => {
 			// Mock state to mark entry-2 as deleted
 			const originalLoadState = await import("../src/state.ts");
 			const loadStateSpy = vi.spyOn(originalLoadState, "loadState").mockReturnValue({
+				version: 1,
 				marks: {
 					"entry-2": { mark: "deleted" },
 				},
 				compressionModel: undefined,
-				readHookEnabled: false,
+				readHookEnabled: false
 			});
 			
 			const result = await tool.execute("test-call", { action: "list" }, undefined, undefined, mockCtx);
@@ -379,7 +380,7 @@ describe("manage_context_select tool (legacy)", () => {
 		
 		// Results should be structurally identical
 		expect(result1.content[0].type).toBe(result2.content[0].type);
-		expect(typeof result1.content[0].text).toBe(typeof result2.content[0].text);
+		expect(typeof result1.content[0]).toBe(typeof result2.content[0]);
 	});
 });
 

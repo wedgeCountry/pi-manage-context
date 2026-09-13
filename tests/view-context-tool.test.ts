@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { buildViewContextTool } from "../src/view-context-tool.ts";
+import { buildViewContextTool } from "../src/tools/view-context.ts";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 
@@ -73,7 +73,8 @@ describe("view_context tool", () => {
 			expect(params.properties.includeDeleted).toBeDefined();
 			expect(params.properties.showRetention).toBeDefined();
 			
-			expect(params.properties.format.enum).toEqual(["summary", "detailed", "llm-json"]);
+			const formatOptions = params.properties.format.anyOf.map((opt: any) => opt.const);
+			expect(formatOptions).toEqual(["summary", "detailed", "llm-json"]);
 		});
 	});
 
@@ -151,11 +152,12 @@ describe("view_context tool", () => {
 			// Mock state to mark entry-2 as deleted
 			const originalLoadState = await import("../src/state.ts");
 			const loadStateSpy = vi.spyOn(originalLoadState, "loadState").mockReturnValue({
+				version: 1,
 				marks: {
 					"entry-2": { mark: "deleted" },
 				},
 				compressionModel: undefined,
-				readHookEnabled: false,
+				readHookEnabled: false
 			});
 			
 			const result = await tool.execute("test-call", {}, undefined, undefined, mockCtx);
@@ -177,11 +179,12 @@ describe("view_context tool", () => {
 			// Mock state to mark entry-2 as deleted
 			const originalLoadState = await import("../src/state.ts");
 			const loadStateSpy = vi.spyOn(originalLoadState, "loadState").mockReturnValue({
+				version: 1,
 				marks: {
 					"entry-2": { mark: "deleted" },
 				},
 				compressionModel: undefined,
-				readHookEnabled: false,
+				readHookEnabled: false
 			});
 			
 			const result = await tool.execute("test-call", { includeDeleted: true }, undefined, undefined, mockCtx);
