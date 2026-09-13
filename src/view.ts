@@ -145,17 +145,31 @@ export class ManageContextView implements Component {
 	private abortController = new AbortController();
 
 	private readonly config: ManageContextViewConfig;
+	private readonly tui: TUI;
+	private readonly theme: Theme;
+	private readonly units: TurnUnit[];
+	private readonly state: ManageContextState;
+	private readonly ctx: ExtensionCommandContext;
+	private readonly pi: ExtensionAPI;
+	private readonly done: (result: void) => void;
 
 	constructor(
-		private readonly tui: TUI,
-		private readonly theme: Theme,
-		private readonly units: TurnUnit[],
-		private readonly state: ManageContextState,
-		private readonly ctx: ExtensionCommandContext,
-		private readonly pi: ExtensionAPI,
-		private readonly done: (result: void) => void,
+		tui: TUI,
+		theme: Theme,
+		units: TurnUnit[],
+		state: ManageContextState,
+		ctx: ExtensionCommandContext,
+		pi: ExtensionAPI,
+		done: (result: void) => void,
 		config?: Partial<ManageContextViewConfig>,
 	) {
+		this.tui = tui;
+		this.theme = theme;
+		this.units = units;
+		this.state = state;
+		this.ctx = ctx;
+		this.pi = pi;
+		this.done = done;
 		this.config = { ...defaultManageContextViewConfig, ...config };
 		this.previewContentWidth = this.config.sectionRuleWidth;
 		const minRows = this.config.minListRows;

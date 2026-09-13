@@ -95,7 +95,7 @@ export function renderUnitForCompression(unit: TurnUnit): string {
 		parts.push(callParts.join("\n\n"));
 	} else {
 		const [message] = sessionEntryToContextMessages(unit.anchorEntry);
-		const anyMsg = message as Record<string, unknown>;
+		const anyMsg = message as unknown as Record<string, unknown>;
 		const content = anyMsg.content as string | (TextContent | ImageContent)[];
 		parts.push(truncate(contentToPreviewText(content)));
 	}

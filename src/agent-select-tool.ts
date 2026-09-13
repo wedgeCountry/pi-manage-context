@@ -65,15 +65,15 @@ function matches(unit: TurnUnit, textMatch: string | undefined, groupIds: string
 	return byText || byId;
 }
 
-export function buildManageContextSelectTool(pi: ExtensionAPI): ToolDefinition<typeof paramsSchema, unknown> {
+function buildManageContextSelectToolImpl(pi: ExtensionAPI, name: string, label: string, promptSnippet: string): ToolDefinition<typeof paramsSchema, unknown> {
 	return {
-		name: "manage_context_select",
-		label: "Manage context (select)",
+		name,
+		label,
 		description:
-			"List the turn units in your own conversation context, or select/unselect them by a text substring (matched against heading, message text, and tool call name/arguments/result) or groupId. " +
+			"list/select/unselect the turn units in your own conversation context. 'list' reports every unit; 'select'/'unselect' apply that mark to units matched by a text substring (matched against heading, message text, and tool call name/arguments/result) or groupId. " +
 			"Unselected units are hidden from your context on the next turn — they are not deleted and can be re-selected later. " +
 			"Use 'list' first to see current groupIds, headings, and marks before selecting/unselecting.",
-		promptSnippet: "manage_context_select — list/select/unselect your own context turns by topic",
+		promptSnippet,
 		parameters: paramsSchema,
 		async execute(_toolCallId, params: Params, _signal, _onUpdate, ctx: ExtensionContext) {
 			const entries = ctx.sessionManager.buildContextEntries();
@@ -96,7 +96,7 @@ export function buildManageContextSelectTool(pi: ExtensionAPI): ToolDefinition<t
 					content: [
 						{
 							type: "text",
-							text: "manage_context_select: provide textMatch and/or groupIds to select/unselect units.",
+							text: `${name}: provide textMatch and/or groupIds to select/unselect units.`,
 						},
 					],
 					details: undefined,
@@ -128,4 +128,18 @@ export function buildManageContextSelectTool(pi: ExtensionAPI): ToolDefinition<t
 			};
 		},
 	};
+}
+
+/**
+ * Original tool name (underscore version).
+ */
+export function buildManageContextSelectTool(pi: ExtensionAPI): ToolDefinition<typeof paramsSchema, unknown> {
+	return buildManageContextSelectToolImpl(pi, "manage_context_select", "Manage context (select)", "manage_context_select — list/select/unselect your own context turns by topic");
+}
+
+/**
+ * Hyphenated alias for consistency with view-context tool naming.
+ */
+export function buildManageContextTool(pi: ExtensionAPI): ToolDefinition<typeof paramsSchema, unknown> {
+	return buildManageContextSelectToolImpl(pi, "manage-context", "Manage context", "manage-context — list/select/unselect your own context turns by topic");
 }

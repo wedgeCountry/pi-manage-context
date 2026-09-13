@@ -8,7 +8,7 @@
  * selected / unselected / compressed / deleted together, as a single row.
  */
 
-import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ImageContent, TextContent } from "@earendil-works/pi-ai";
 import type { SessionEntry, SessionMessageEntry } from "@earendil-works/pi-coding-agent";
 import { estimateTokens, sessionEntryToContextMessages } from "@earendil-works/pi-coding-agent";
 
@@ -59,7 +59,12 @@ export interface TurnUnit {
 	metadata: TurnUnitMetadata;
 }
 
-export function hasToolCalls(entry: SessionEntry): entry is SessionMessageEntry {
+/** A message entry whose message is specifically an assistant message that made tool calls. */
+export interface AssistantToolCallEntry extends SessionMessageEntry {
+	message: AssistantMessage;
+}
+
+export function hasToolCalls(entry: SessionEntry): entry is AssistantToolCallEntry {
 	return (
 		entry.type === "message" &&
 		entry.message.role === "assistant" &&
@@ -166,7 +171,7 @@ export function extractKeyFacts(kind: TurnUnitKind, content: string): string[] {
 /**
  * Calculate an importance score (0-100) for an entry.
  */
-export function calculateImportanceScore(kind: TurnUnitKind, content: string, metadata?: TurnUnitMetadata): number {
+export function calculateImportanceScore(kind: TurnUnitKind, content: string, metadata?: Partial<TurnUnitMetadata>): number {
 	let score = 50; // Base score
 	
 	// Boost for user messages (instructions)
@@ -199,7 +204,7 @@ export function calculateImportanceScore(kind: TurnUnitKind, content: string, me
 /**
  * Generate a retention reason based on content analysis.
  */
-export function generateRetentionReason(kind: TurnUnitKind, content: string, metadata?: TurnUnitMetadata): string | undefined {
+export function generateRetentionReason(kind: TurnUnitKind, content: string, metadata?: Partial<TurnUnitMetadata>): string | undefined {
 	if (kind === "user") {
 		return "Contains user instructions or requirements";
 	}
@@ -277,9 +282,10 @@ export function buildTurnUnits(entries: SessionEntry[]): TurnUnit[] {
 					const result = resultEntries.find(
 						(r) => r.message.role === "toolResult" && r.message.toolCallId === call.id,
 					);
-					const resultText = result
-						? contentToPreviewText(result.message.content)
-						: "(no result yet)";
+					const resultText =
+						result && result.message.role === "toolResult"
+							? contentToPreviewText(result.message.content)
+							: "(no result yet)";
 					return {
 						name: call.name,
 						arguments: extractToolArguments(call.arguments),

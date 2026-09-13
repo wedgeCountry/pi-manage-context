@@ -36,15 +36,13 @@
 
 import { resolve } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
+import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import type {
-	AutocompleteItem,
 	ContextEvent,
-	ContextEventResult,
 	ExtensionAPI,
 	ExtensionCommandContext,
 	KeybindingsManager,
 	ToolResultEvent,
-	ToolResultEventResult,
 } from "@earendil-works/pi-coding-agent";
 import { isReadToolResult } from "@earendil-works/pi-coding-agent";
 
@@ -52,7 +50,8 @@ import { buildFilteredMessages } from "./src/context-filter.ts";
 import { loadState, saveState } from "./src/state.ts";
 import { buildTurnUnits, type TurnUnit } from "./src/turn-units.ts";
 import { ManageContextView } from "./src/view.ts";
-import { buildManageContextSelectTool } from "./src/agent-select-tool.ts";
+import { buildManageContextSelectTool, buildManageContextTool } from "./src/agent-select-tool.ts";
+import { buildViewContextTool } from "./src/view-context-tool.ts";
 
 /**
  * True if `unit` is an assistant turn whose *only* tool call is a read() on
@@ -84,7 +83,7 @@ export default function (pi: ExtensionAPI): void {
 		cachedModels = ctx.modelRegistry.getAvailable();
 	});
 
-	pi.on("context", (_event: ContextEvent, ctx): ContextEventResult | void => {
+	pi.on("context", (_event: ContextEvent, ctx) => {
 		const entries = ctx.sessionManager.buildContextEntries();
 		const units = buildTurnUnits(entries);
 		const state = loadState(ctx);
@@ -92,7 +91,7 @@ export default function (pi: ExtensionAPI): void {
 		return { messages: buildFilteredMessages(entries, units, state) };
 	});
 
-	pi.on("tool_result", (event: ToolResultEvent, ctx): ToolResultEventResult | void => {
+	pi.on("tool_result", (event: ToolResultEvent, ctx) => {
 		if (!isReadToolResult(event)) return;
 		if (event.isError) return;
 
@@ -121,6 +120,8 @@ export default function (pi: ExtensionAPI): void {
 	});
 
 	pi.registerTool(buildManageContextSelectTool(pi));
+	pi.registerTool(buildManageContextTool(pi));
+	pi.registerTool(buildViewContextTool());
 
 	pi.registerCommand("manage_context", {
 		description: "Review, select, compress, or delete messages from the model's context",
@@ -160,7 +161,7 @@ export default function (pi: ExtensionAPI): void {
 				}
 				state.compressionModel = { provider: model.provider, id: model.id };
 				saveState(pi, state);
-				ctx.ui.notify(`Compression model set to ${trimmed}`, "success");
+				ctx.ui.notify(`Compression model set to ${trimmed}`, "info");
 			}
 
 			const entries = ctx.sessionManager.buildContextEntries();

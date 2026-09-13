@@ -12,7 +12,7 @@ import type { ManageContextState } from "./state.ts";
 import type { TurnUnit } from "./turn-units.ts";
 
 function cloneWithReplacedContent(message: AgentMessage, compressedText: string): AgentMessage {
-	const anyMsg = message as Record<string, unknown> & { role: string };
+	const anyMsg = message as unknown as Record<string, unknown> & { role: string };
 	if (anyMsg.role === "assistant") {
 		return { ...(message as any), content: [{ type: "text", text: compressedText }] };
 	}
