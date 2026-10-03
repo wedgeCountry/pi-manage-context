@@ -81,6 +81,7 @@ function makeHarness(entries: SessionEntry[]): { pi: ExtensionAPI; ctx: Extensio
       getEntries: () => entries,
       buildContextEntries: () => entries,
     },
+    ui: { notify: () => {} },
   } as unknown as ExtensionContext;
 
   return { pi, ctx };

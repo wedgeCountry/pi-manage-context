@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import type { SessionMessageEntry } from "@earendil-works/pi-coding-agent";
 import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
-import { unitHasMatchingRead } from "../index.ts";
+import { unitHasMatchingRead, unitHasMatchingToolCallId } from "../index.ts";
 import type { TurnUnit } from "../src/turn-units.ts";
 
 const usage: Usage = {
@@ -118,5 +118,67 @@ describe("unitHasMatchingRead", () => {
     const unit: TurnUnit = { ...assistantToolUnit(entry), anchorEntry: userEntry };
 
     expect(unitHasMatchingRead(unit, resolve("./hello.txt"), OTHER_CALL_ID)).toBe(false);
+  });
+});
+
+describe("unitHasMatchingToolCallId", () => {
+  it("matches a unit whose anchor includes a tool call with the given id", () => {
+    const entry = toolCallEntry("entry_1", [{ toolCallId: "call_1", toolName: "manage-context", args: {} }]);
+    const unit = assistantToolUnit(entry);
+
+    expect(unitHasMatchingToolCallId(unit, "call_1")).toBe(true);
+  });
+
+  it("does not match a different tool call id in the same unit", () => {
+    const entry = toolCallEntry("entry_1", [{ toolCallId: "call_1", toolName: "manage-context", args: {} }]);
+    const unit = assistantToolUnit(entry);
+
+    expect(unitHasMatchingToolCallId(unit, "call_other")).toBe(false);
+  });
+
+  it("does not match when the target call is bundled with another tool call in the same turn", () => {
+    // Hiding the unit would also hide the unrelated `read` call's result
+    // bundled into the same turn — same collateral-damage guard as
+    // unitHasMatchingRead's "bundled with another tool call" case below.
+    const entry = toolCallEntry("entry_1", [
+      { toolCallId: "call_1", toolName: "read", args: { path: "./hello.txt" } },
+      { toolCallId: "call_2", toolName: "manage-context", args: {} },
+    ]);
+    const unit = assistantToolUnit(entry);
+
+    expect(unitHasMatchingToolCallId(unit, "call_2")).toBe(false);
+  });
+
+  it("does not match even when every call in the bundle is itself self-unselect-eligible", () => {
+    // Conservative on purpose: two manage-context-family calls bundled
+    // together still isn't the single-call shape this is scoped to handle.
+    const entry = toolCallEntry("entry_1", [
+      { toolCallId: "call_1", toolName: "manage-context", args: {} },
+      { toolCallId: "call_2", toolName: "manage_context_select", args: {} },
+    ]);
+    const unit = assistantToolUnit(entry);
+
+    expect(unitHasMatchingToolCallId(unit, "call_2")).toBe(false);
+  });
+
+  it("does not match units that are not assistant_tool", () => {
+    const entry = toolCallEntry("entry_1", [{ toolCallId: "call_1", toolName: "manage-context", args: {} }]);
+    const unit: TurnUnit = { ...assistantToolUnit(entry), kind: "user" };
+
+    expect(unitHasMatchingToolCallId(unit, "call_1")).toBe(false);
+  });
+
+  it("does not match when the anchor entry is not an assistant message", () => {
+    const entry = toolCallEntry("entry_1", [{ toolCallId: "call_1", toolName: "manage-context", args: {} }]);
+    const userEntry = {
+      type: "message",
+      id: entry.id,
+      parentId: null,
+      timestamp: "0",
+      message: { role: "user", content: "hi", timestamp: 0 },
+    } as unknown as SessionMessageEntry;
+    const unit: TurnUnit = { ...assistantToolUnit(entry), anchorEntry: userEntry };
+
+    expect(unitHasMatchingToolCallId(unit, "call_1")).toBe(false);
   });
 });

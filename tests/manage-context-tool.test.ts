@@ -15,6 +15,7 @@ function createMockContext(entries: SessionEntry[] = []): ExtensionContext {
 			buildContextEntries: vi.fn(() => entries),
 			getEntries: vi.fn(() => entries),
 		},
+		ui: { notify: vi.fn() },
 	} as unknown as ExtensionContext;
 }
 
@@ -303,6 +304,32 @@ describe("manage-context tool", () => {
 			
 			const text = (result.content[0] as any).text;
 			expect(text).toContain("provide textMatch and/or groupIds");
+		});
+	});
+
+	describe("user-visible notification on mutation", () => {
+		it("notifies the user when select/unselect actually changes marks", async () => {
+			const tool = buildManageContextTool(mockPi);
+			const entries: SessionEntry[] = [createUserMessageEntry("entry-1", "Draft implementation")];
+			const mockCtx = createMockContext(entries);
+
+			await tool.execute("test-call", { action: "unselect", textMatch: "draft" }, undefined, undefined, mockCtx);
+
+			expect(mockCtx.ui.notify).toHaveBeenCalledTimes(1);
+			const [message] = (mockCtx.ui.notify as any).mock.calls[0];
+			expect(message).toContain("unselected");
+			expect(message).toContain("entry-1");
+		});
+
+		it("does not notify for a list call or a no-op select/unselect", async () => {
+			const tool = buildManageContextTool(mockPi);
+			const entries: SessionEntry[] = [createUserMessageEntry("entry-1", "hi")];
+			const mockCtx = createMockContext(entries);
+
+			await tool.execute("test-call", { action: "list" }, undefined, undefined, mockCtx);
+			await tool.execute("test-call", { action: "select", textMatch: "nonexistent" }, undefined, undefined, mockCtx);
+
+			expect(mockCtx.ui.notify).not.toHaveBeenCalled();
 		});
 	});
 

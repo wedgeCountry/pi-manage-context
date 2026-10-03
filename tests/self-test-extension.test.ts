@@ -110,5 +110,51 @@ describe("extension (unselect integration)", () => {
         const units = buildTurnUnits(entriesAfter);
         const filtered = buildFilteredMessages(entriesAfter, units, state);
         expect(filtered.length).toBeLessThan(entriesAfter.length);
+
+        // The manage-context tool call itself — the assistant's toolCall
+        // block plus the toolResult it produced — should never be sent back
+        // to the model: unselecting is meant to shrink context, not spend
+        // tokens reporting on itself every subsequent turn. It should be
+        // auto-unselected without the model (or this test) having to ask for
+        // it explicitly. But only the *last* such call auto-hides — if the
+        // model called the tool more than once, earlier calls stay visible
+        // rather than all of them silently vanishing.
+        const SELF_TOOL_NAMES = new Set(["manage-context", "manage_context_select"]);
+        const selfToolCallIds = (u: (typeof units)[number]): string[] => {
+            if (u.anchorEntry.type !== "message" || u.anchorEntry.message.role !== "assistant") return [];
+            return u.anchorEntry.message.content
+                .filter((c: any) => c.type === "toolCall" && SELF_TOOL_NAMES.has(c.name))
+                .map((c: any) => c.id as string);
+        };
+        const idPresentInFiltered = (ids: Set<string>) =>
+            filtered.some((m) => {
+                if (m.role === "assistant" && Array.isArray(m.content)) {
+                    return m.content.some((c: any) => c.type === "toolCall" && ids.has(c.id));
+                }
+                if (m.role === "toolResult") return ids.has(m.toolCallId);
+                return false;
+            });
+
+        const selfUnits = units.filter((u) => u.kind === "assistant_tool" && selfToolCallIds(u).length > 0);
+        expect(selfUnits.length).toBeGreaterThan(0);
+
+        const lastSelfUnit = selfUnits[selfUnits.length - 1];
+        expect(idPresentInFiltered(new Set(selfToolCallIds(lastSelfUnit)))).toBe(false);
+
+        if (selfUnits.length > 1) {
+            const earlierIds = new Set(selfUnits.slice(0, -1).flatMap(selfToolCallIds));
+            expect(idPresentInFiltered(earlierIds)).toBe(true);
+        }
+
+        // The assistant's final report to the user (a separate turn unit,
+        // kind "assistant_text") must stay — only the manage-context tool's
+        // own call/result unit auto-unselects, never the assistant's
+        // subsequent reply. Checked against the unit's mark directly rather
+        // than assuming its content always includes a text block: some
+        // models end a turn with an empty-content assistant message, and
+        // that's a model-behavior detail this test shouldn't be sensitive to.
+        const finalTextUnit = units.find((u) => u.kind === "assistant_text");
+        expect(finalTextUnit).toBeDefined();
+        expect(state.marks[finalTextUnit!.groupId]?.mark).not.toBe("unselected");
     }, 120_000);
 });

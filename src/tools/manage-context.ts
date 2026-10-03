@@ -64,10 +64,18 @@ export function unitMatches(unit: TurnUnit, textMatch: string | undefined, group
  */
 export function runManageContext(units: TurnUnit[], state: ManageContextState, params: ManageContextParams, toolName: string): ManageContextRunResult {
 	if (params.action === "list") {
-		const rows = units.map((u) => ({
-			...toLLMMemoryEntry(u),
-			mark: state.marks[u.groupId]?.mark ?? "selected",
-		}));
+		const rows = units.map((u) => {
+			const info = state.marks[u.groupId];
+			const entry = toLLMMemoryEntry(u);
+			// A realized compression resets the stored mark back to "selected"
+			// (see view.ts) while buildFilteredMessages keeps serving
+			// compressedText in its place (context-filter.ts) — report that
+			// effective state, and the text actually sent, not the stale mark
+			// and the pre-compression original, or the model will reason about
+			// content it never actually sees.
+			if (info?.compressedText) return { ...entry, mark: "compressed" as const, content: info.compressedText };
+			return { ...entry, mark: info?.mark ?? "selected" };
+		});
 		return {
 			content: [{ type: "text", text: JSON.stringify(rows, null, 2) }],
 			details: rows,
@@ -116,7 +124,14 @@ function buildManageContextToolImpl(pi: ExtensionAPI, definition: typeof MANAGE_
 			const units = buildTurnUnits(entries).filter((u) => state.marks[u.groupId]?.mark !== "deleted");
 
 			const result = runManageContext(units, state, params, definition.name);
-			if (result.changed) saveState(pi, state);
+			if (result.changed) {
+				saveState(pi, state);
+				// select/unselect silently change what the model sees on its very
+				// next turn (see the "context" handler in index.ts) — surface it so
+				// a human watching the session has a visible trail of the agent
+				// editing its own context, instead of content just disappearing.
+				ctx.ui.notify(`${definition.name}: ${result.content[0].text}`, "info");
+			}
 
 			return { content: result.content, details: result.details };
 		},

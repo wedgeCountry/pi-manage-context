@@ -54,6 +54,34 @@ import { registerManageContextSelectTool, registerManageContextTool } from "./sr
 import { registerViewContextTool } from "./src/tools/view-context.ts";
 
 /**
+ * The manage-context tool's own tool call + result are auto-unselected right
+ * after it runs (see the "tool_result" hook below) — otherwise every
+ * subsequent turn would keep re-sending the tool call that was supposed to
+ * shrink the context, defeating the point. Both registered names count (see
+ * CLAUDE.md's "One implementation, multiple registered names").
+ */
+const SELF_UNSELECT_TOOL_NAMES = new Set(["manage-context", "manage_context_select"]);
+
+/**
+ * True if `unit`'s anchor assistant message has exactly one tool call and
+ * its id is `toolCallId`. Hiding a unit hides every call bundled into it, so
+ * this deliberately refuses to match when the matching call shares its turn
+ * with any other tool call (same collateral-damage guard as
+ * unitHasMatchingRead below) — callers that auto-hide on a match would
+ * otherwise also hide unrelated calls' results just because they happened
+ * to land in the same assistant turn.
+ */
+export function unitHasMatchingToolCallId(unit: TurnUnit, toolCallId: string): boolean {
+	if (unit.kind !== "assistant_tool") return false;
+	if (unit.anchorEntry.type !== "message" || unit.anchorEntry.message.role !== "assistant") return false;
+
+	const toolCalls = unit.anchorEntry.message.content.filter((block) => block.type === "toolCall");
+	if (toolCalls.length !== 1) return false;
+
+	return toolCalls[0].id === toolCallId;
+}
+
+/**
  * True if `unit` is an assistant turn whose *only* tool call is a read() on
  * `resolvedPath`. Units that bundle other tool calls alongside the read are
  * left alone — unselecting the unit would hide those other calls too, since
@@ -112,6 +140,44 @@ export default function (pi: ExtensionAPI): void {
 			const mark = state.marks[unit.groupId]?.mark;
 			if (mark === "deleted" || mark === "unselected") continue;
 
+			state.marks[unit.groupId] = { mark: "unselected" };
+			changed = true;
+		}
+
+		if (changed) saveState(pi, state);
+	});
+
+	pi.on("tool_result", (event: ToolResultEvent, ctx) => {
+		if (!SELF_UNSELECT_TOOL_NAMES.has(event.toolName)) return;
+		if (event.isError) return;
+
+		const units = buildTurnUnits(ctx.sessionManager.buildContextEntries());
+		const unit = units.find((u) => unitHasMatchingToolCallId(u, event.toolCallId));
+		if (!unit) return;
+
+		const state = loadState(ctx);
+		let changed = false;
+
+		// Only the most recently completed manage-context call stays
+		// auto-hidden. Without this, a session that calls the tool several
+		// times (e.g. one prompt triggering multiple unselect calls) would
+		// have every one of them vanish from context — restore any earlier
+		// call this same hook had hidden, unless the user has since taken it
+		// over with their own mark (deletion, or a compression).
+		for (const other of units) {
+			if (other.groupId === unit.groupId) continue;
+			if (other.kind !== "assistant_tool") continue;
+			if (!other.metadata.toolCalls?.some((tc) => SELF_UNSELECT_TOOL_NAMES.has(tc.name))) continue;
+			if (state.marks[other.groupId]?.mark === "unselected") {
+				delete state.marks[other.groupId];
+				changed = true;
+			}
+		}
+
+		// Deletions are permanent by design (see the picker docs above) — never
+		// resurrect one into the lesser "unselected" state.
+		const mark = state.marks[unit.groupId]?.mark;
+		if (mark !== "deleted") {
 			state.marks[unit.groupId] = { mark: "unselected" };
 			changed = true;
 		}

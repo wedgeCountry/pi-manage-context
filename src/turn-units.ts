@@ -264,8 +264,19 @@ export function buildTurnUnits(entries: SessionEntry[]): TurnUnit[] {
 					j++;
 					continue;
 				}
-				// Anything else means results for this turn have not all
-				// arrived yet (mid-turn) — stop collecting, show what we have.
+				// Non-message bookkeeping entries (state saves, compaction
+				// markers, labels, ...) can legitimately land between a tool
+				// call and its result — e.g. a tool's own execute() persisting
+				// state before returning. Skip over them without ending
+				// collection; they're picked up on their own turn through the
+				// pass-through path below.
+				if (candidate.type !== "message") {
+					j++;
+					continue;
+				}
+				// A genuine message that isn't one of this turn's pending
+				// results means results for this turn have not all arrived
+				// yet (mid-turn) — stop collecting, show what we have.
 				break;
 			}
 
@@ -282,9 +293,14 @@ export function buildTurnUnits(entries: SessionEntry[]): TurnUnit[] {
 					const result = resultEntries.find(
 						(r) => r.message.role === "toolResult" && r.message.toolCallId === call.id,
 					);
+					// Capped like every other text path here (preserveLineBreaks is used
+					// for user/assistant/custom_message summaries below) — an uncapped
+					// tool result (e.g. a large file read) would make this unit's own
+					// list/textMatch footprint as big as the context the
+					// manage-context tool exists to shrink.
 					const resultText =
 						result && result.message.role === "toolResult"
-							? contentToPreviewText(result.message.content)
+							? preserveLineBreaks(contentToPreviewText(result.message.content))
 							: "(no result yet)";
 					return {
 						name: call.name,

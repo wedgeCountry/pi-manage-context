@@ -62,6 +62,22 @@ describe("unitSearchText / unitMatches", () => {
 });
 
 describe("runManageContext", () => {
+	it("list reports a realized compression as mark:'compressed' with the compressed text, not the stale 'selected' mark/original content", () => {
+		// view.ts resets mark back to "selected" once a compression is realized,
+		// keeping compressedText around so buildFilteredMessages keeps serving
+		// the summary (see context-filter.ts). The agent-facing `list` action
+		// must reflect that effective state, not the raw stored mark, or the
+		// model will think it's looking at the original text it never sees.
+		const units = [makeUnit("e1", "Long explanation of the bug and its fix")];
+		const state = emptyState();
+		state.marks.e1 = { mark: "selected", compressedText: "Short summary of the fix." };
+
+		const result = runManageContext(units, state, { action: "list" }, "manage-context");
+
+		const rows = JSON.parse(result.content[0].text) as Array<{ id: string; mark: string; content: string }>;
+		expect(rows[0]).toMatchObject({ id: "e1", mark: "compressed", content: "Short summary of the fix." });
+	});
+
 	it("list reports every unit with its current mark, without mutating state", () => {
 		const units = [makeUnit("e1", "Please refactor the auth module"), makeUnit("e2", "hi there")];
 		const state = emptyState();
