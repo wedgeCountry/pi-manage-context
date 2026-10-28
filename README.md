@@ -15,6 +15,12 @@ Type `/manage_context` in the pi session to open an interactive picker where you
 
 Delete and compress operations prompt for confirmation before applying.
 
+### Context Export (`/export_context`)
+
+Type `/export_context [filename.md]` to write the summarized context as a markdown file to the
+working directory. Uses a timestamped `context-export-<date>.md` name when no filename is given.
+Deleted entries are excluded — the export mirrors what the model actually sees.
+
 ### Agent Tools
 
 The extension provides three tools for the AI agent to manage its own context:

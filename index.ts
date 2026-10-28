@@ -6,6 +6,7 @@
  *   /manage_context                      open the picker
  *   /manage_context <provider>/<modelId> set the compression model, then open the picker
  *   /manage_context model                print the currently configured compression model
+ *   /export_context [filename.md]        write the summarized context as a markdown file to the current dir
  *   /toggle-read-hook                    toggle the read tool's post-execution hook (default: off)
  *
  * Keys inside the picker:
@@ -46,7 +47,10 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { isReadToolResult } from "@earendil-works/pi-coding-agent";
 
+import { writeFile } from "node:fs/promises";
+
 import { buildFilteredMessages } from "./src/context-filter.ts";
+import { exportUnitsToMarkdown } from "./src/markdown-export.ts";
 import { loadState, saveState } from "./src/state.ts";
 import { buildTurnUnits, type TurnUnit } from "./src/turn-units.ts";
 import { ManageContextView } from "./src/view.ts";
@@ -249,6 +253,45 @@ export default function (pi: ExtensionAPI): void {
 				// terminals. Claim most of the terminal instead.
 				{ overlay: true, overlayOptions: { width: "95%", minWidth: 60 } },
 			);
+		},
+	});
+
+	pi.registerCommand("export_context", {
+		description: "Export the current context as a markdown file to the working directory",
+		handler: async (args: string, ctx: ExtensionCommandContext) => {
+			const trimmed = args.trim();
+			if (trimmed.includes("/") || trimmed.includes("\\")) {
+				ctx.ui.notify("export_context: filename must be a plain name in the current directory", "error");
+				return;
+			}
+			const filename = trimmed || `context-export-${new Date().toISOString().replace(/[:.]/g, "-")}.md`;
+			const targetPath = resolve(ctx.cwd, filename);
+
+			const state = loadState(ctx);
+			const entries = ctx.sessionManager.buildContextEntries();
+			// Deleted units are gone from the model's context by design — the
+			// export mirrors what the model actually sees, so they stay excluded.
+			const units = buildTurnUnits(entries).filter((u) => state.marks[u.groupId]?.mark !== "deleted");
+			if (units.length === 0) {
+				ctx.ui.notify("No messages in context yet.", "info");
+				return;
+			}
+
+			// Summaries are already capped per unit (preserveLineBreaks in
+			// turn-units.ts), so the export is a compact, summarized view —
+			// not a dump of the full conversation.
+			const markdown = exportUnitsToMarkdown(units, {
+				title: "Context Export",
+				includeSummary: true,
+			});
+
+			try {
+				await writeFile(targetPath, markdown, "utf-8");
+			} catch (error) {
+				ctx.ui.notify(`export_context: failed to write ${targetPath}: ${error instanceof Error ? error.message : String(error)}`, "error");
+				return;
+			}
+			ctx.ui.notify(`Exported ${units.length} entries to ${targetPath}`, "info");
 		},
 	});
 

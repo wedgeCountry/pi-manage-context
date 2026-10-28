@@ -66,4 +66,5 @@ one plain function; `src/tools/manage-context.ts` exports `buildManageContextToo
   actually sent to the model; wired into the `"context"` event in `index.ts`.
 - `src/view.ts` — the interactive `/manage_context` picker UI (not a tool).
 - `src/compression.ts`, `src/llm-export.ts`, `src/markdown-export.ts` — supporting logic used
-  by the picker and by the tools' `llm-json`/summary output formats.
+  by the picker and by the tools' `llm-json`/summary output formats. `markdown-export.ts` backs
+  the `/export_context` command in `index.ts`.
