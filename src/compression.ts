@@ -23,8 +23,6 @@ The input will include structured metadata with:
 - TIMESTAMP: When the entry occurred
 - TOOL_CALLS (if applicable): Structured tool call information with names, arguments, and results
 - CONTENT: The main content to compress
-- KEY_FACTS: Important facts that should be preserved
-- IMPORTANCE_SCORE: How important this entry is (0-100)
 
 Preserve everything a future turn could still need: concrete facts, decisions, file paths, identifiers, numbers, error messages, and outcomes. Drop conversational filler, restated context, and verbose formatting.
 
@@ -49,8 +47,6 @@ export function renderUnitForCompression(unit: TurnUnit): string {
 	parts.push(`TYPE: ${unit.metadata.type}`);
 	parts.push(`TIMESTAMP: ${unit.metadata.timestamp}`);
 	parts.push(`TOKENS: ${unit.tokenEstimate}`);
-	parts.push(`IMPORTANCE_SCORE: ${unit.metadata.importanceScore}/100`);
-	parts.push(`RETENTION_REASON: ${unit.metadata.retentionReason || "N/A"}`);
 	parts.push("");
 	
 	// Add tool calls section if applicable
@@ -67,13 +63,6 @@ export function renderUnitForCompression(unit: TurnUnit): string {
 	}
 	
 	// Add key facts section
-	if (unit.metadata.keyFacts && unit.metadata.keyFacts.length > 0) {
-		parts.push(`KEY_FACTS (${unit.metadata.keyFacts.length} total):`);
-		unit.metadata.keyFacts.forEach(fact => {
-			parts.push(`  • ${fact}`);
-		});
-		parts.push("");
-	}
 	
 	// Add the main content
 	parts.push(`CONTENT:`);
@@ -149,28 +138,4 @@ export async function compressUnit(
 		.trim();
 	if (!text) throw new Error("compression returned empty output");
 	return text;
-}
-
-/**
- * Generate a retention decision summary for LLM guidance.
- */
-export function generateRetentionSummary(unit: TurnUnit): string {
-	const parts: string[] = [];
-	
-	parts.push(`Entry Type: ${unit.metadata.type}`);
-	parts.push(`Heading: ${unit.metadata.heading}`);
-	parts.push(`Importance Score: ${unit.metadata.importanceScore}/100`);
-	parts.push(`Token Count: ${unit.tokenEstimate}`);
-	
-	if (unit.metadata.toolCalls) {
-		parts.push(`Tool Calls: ${unit.metadata.toolCalls.length}`);
-	}
-	
-	if (unit.metadata.keyFacts) {
-		parts.push(`Key Facts: ${unit.metadata.keyFacts.length}`);
-	}
-	
-	parts.push(`Retention Reason: ${unit.metadata.retentionReason}`);
-	
-	return parts.join("\n");
 }

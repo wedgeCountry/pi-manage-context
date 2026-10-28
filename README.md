@@ -32,7 +32,6 @@ Creates a human-readable overview similar to what the user sees in the `/manage_
 **Parameters:**
 - `format` (optional): `"summary"` (brief overview), `"detailed"` (full metadata), or `"llm-json"` (structured JSON). Defaults to `"summary"`.
 - `includeDeleted` (optional): If `true`, include entries marked as deleted. Defaults to `false`.
-- `showRetention` (optional): If `true`, show retention analysis for each entry. Only applies to `"detailed"` format. Defaults to `false`.
 
 **Example usage:**
 ```

@@ -51,8 +51,8 @@ import { writeFile } from "node:fs/promises";
 
 import { buildFilteredMessages } from "./src/context-filter.ts";
 import { exportUnitsToMarkdown } from "./src/markdown-export.ts";
-import { loadState, saveState } from "./src/state.ts";
-import { buildTurnUnits, type TurnUnit } from "./src/turn-units.ts";
+import { loadState, saveState, hasMarks, pruneMarks } from "./src/state.ts";
+import { buildTurnUnitGroups, buildTurnUnits, type TurnUnit } from "./src/turn-units.ts";
 import { ManageContextView } from "./src/view.ts";
 import { registerManageContextSelectTool, registerManageContextTool } from "./src/tools/manage-context.ts";
 import { registerViewContextTool } from "./src/tools/view-context.ts";
@@ -116,11 +116,13 @@ export default function (pi: ExtensionAPI): void {
 	});
 
 	pi.on("context", (_event: ContextEvent, ctx) => {
-		const entries = ctx.sessionManager.buildContextEntries();
-		const units = buildTurnUnits(entries);
 		const state = loadState(ctx);
-		if (Object.keys(state.marks).length === 0) return; // nothing to change
-		return { messages: buildFilteredMessages(entries, units, state) };
+		if (!hasMarks(state)) return; // nothing to change — skip all grouping work
+		const entries = ctx.sessionManager.buildContextEntries();
+		// Cheap structural groups only: the filter needs entryIds/kind, not
+		// the enriched metadata the picker and tools use.
+		const groups = buildTurnUnitGroups(entries);
+		return { messages: buildFilteredMessages(entries, groups, state) };
 	});
 
 	pi.on("tool_result", (event: ToolResultEvent, ctx) => {
@@ -129,6 +131,7 @@ export default function (pi: ExtensionAPI): void {
 
 		const state = loadState(ctx);
 		if (!state.readHookEnabled) return;
+		if (!hasMarks(state)) return; // nothing marked — no read can match anything
 
 		const path = event.input.path;
 		if (typeof path !== "string") return;
@@ -148,7 +151,10 @@ export default function (pi: ExtensionAPI): void {
 			changed = true;
 		}
 
-		if (changed) saveState(pi, state);
+		if (changed) {
+			pruneMarks(state, new Set(units.map((u) => u.groupId)));
+			saveState(pi, state);
+		}
 	});
 
 	pi.on("tool_result", (event: ToolResultEvent, ctx) => {
@@ -186,7 +192,10 @@ export default function (pi: ExtensionAPI): void {
 			changed = true;
 		}
 
-		if (changed) saveState(pi, state);
+		if (changed) {
+			pruneMarks(state, new Set(units.map((u) => u.groupId)));
+			saveState(pi, state);
+		}
 	});
 
 	registerManageContextSelectTool(pi);

@@ -8,10 +8,12 @@ import { matchesKey, sliceByColumn, truncateToWidth, visibleWidth } from "@earen
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
 
-import { compressUnit, renderUnitForCompression, resolveCompressionModel, generateRetentionSummary } from "./compression.ts";
+import { compressUnit, resolveCompressionModel } from "./compression.ts";
+import { CompressionQueue, defaultResolveMark, type CompressionEvent } from "./compression-queue.ts";
 import { saveState } from "./state.ts";
 import type { Mark, ManageContextState } from "./state.ts";
-import { oneLine, contentToPreviewText, extractToolArguments, extractKeyFacts, generateHeading } from "./turn-units.ts";
+import { MarksController, type MarkIntent } from "./marks-controller.ts";
+import { oneLine } from "./turn-units.ts";
 import type { TurnUnit, TurnUnitMetadata } from "./turn-units.ts";
 
 interface LogLine {
@@ -134,7 +136,6 @@ export class ManageContextView implements Component {
 	private previewContentWidth: number;
 	// Also recomputed each render(), same reasoning as maxVisible above.
 	private previewMaxVisible = 20;
-	private showRetentionInfo = false; // Toggle to show retention information in preview
 	private previewMode: "compact" | "detailed" = "compact"; // Toggle between compact and detailed view
 
 	// processing phase
@@ -152,6 +153,8 @@ export class ManageContextView implements Component {
 	private readonly ctx: ExtensionCommandContext;
 	private readonly pi: ExtensionAPI;
 	private readonly done: (result: void) => void;
+	private readonly marks: MarksController;
+	private queue: CompressionQueue | null = null;
 
 	constructor(
 		tui: TUI,
@@ -171,6 +174,7 @@ export class ManageContextView implements Component {
 		this.pi = pi;
 		this.done = done;
 		this.config = { ...defaultManageContextViewConfig, ...config };
+		this.marks = new MarksController(this.state, units.map((u) => u.groupId));
 		this.previewContentWidth = this.config.sectionRuleWidth;
 		const minRows = this.config.minListRows;
 		this.maxVisible = Math.max(minRows, Math.min(units.length, Math.max(minRows, tui.terminal.rows - this.config.initialHeightReserve)));
@@ -179,29 +183,15 @@ export class ManageContextView implements Component {
 	invalidate(): void {}
 
 	private markOf(groupId: string): Mark {
-		return this.state.marks[groupId]?.mark ?? "selected";
+		return this.marks.rawMark(groupId);
 	}
 
-	/**
-	 * Display mark: a realized compression resets `mark` back to "selected"
-	 * (see runCompressions), but the row should keep reading as "compressed"
-	 * until the user explicitly overrides it (unselect/delete/re-queue).
-	 */
 	private effectiveMark(groupId: string): Mark {
-		const raw = this.markOf(groupId);
-		if (raw === "selected" && this.state.marks[groupId]?.compressedText) return "compressed";
-		return raw;
+		return this.marks.effectiveMark(groupId);
 	}
 
-	private setMark(groupId: string, target: Mark): void {
-		const current = this.markOf(groupId);
-		const existing = this.state.marks[groupId];
-		if (current === target) {
-			// pressing the same key again reverts to "selected"
-			this.state.marks[groupId] = { ...existing, mark: "selected" };
-		} else {
-			this.state.marks[groupId] = { ...existing, mark: target };
-		}
+	private setMark(groupId: string, intent: MarkIntent): void {
+		this.marks.apply(groupId, intent);
 	}
 
 	private glyphFor(mark: Mark): string {
@@ -268,11 +258,11 @@ export class ManageContextView implements Component {
 	}
 
 	private countDeleted(): number {
-		return this.units.filter((u) => this.markOf(u.groupId) === "deleted").length;
+		return this.marks.countBy("deleted");
 	}
 
 	private countCompressed(): number {
-		return this.units.filter((u) => this.markOf(u.groupId) === "compressed").length;
+		return this.marks.countBy("compressed");
 	}
 
 	private rule(width: number, color: Parameters<Theme["fg"]>[0] = "border"): string {
@@ -457,7 +447,7 @@ export class ManageContextView implements Component {
 				lines.push(
 					this.theme.fg("dim", `  line ${scrollTop + 1}-${scrollTop + viewportHeight} of ${fullLines.length}${hint}`),
 				);
-				lines.push(this.theme.fg("dim", "  enter/esc/space/ctrl+c/left close   r retention   m mode"));
+				lines.push(this.theme.fg("dim", "  enter/esc/space/ctrl+c/left close   m mode"));
 			}
 		}
 		return lines;
@@ -494,7 +484,7 @@ export class ManageContextView implements Component {
 		lines.push(
 			this.theme.fg(
 				"dim",
-				`${unit.timestamp}  ·  ${unit.tokenEstimate} tok  ·  importance ${unit.metadata.importanceScore}/100`,
+				`${unit.timestamp}  ·  ${unit.tokenEstimate} tok`,
 			),
 		);
 		lines.push(this.theme.fg("border", "─".repeat(this.config.sectionRuleWidth)));
@@ -521,33 +511,6 @@ export class ManageContextView implements Component {
 		}
 		lines.push("");
 
-		// Key facts section
-		if (unit.metadata.keyFacts && unit.metadata.keyFacts.length > 0) {
-			lines.push(this.sectionHeading("Key facts"));
-			unit.metadata.keyFacts.forEach((fact) => {
-				lines.push(`  ${this.theme.fg("accent", "•")} ${fact}`);
-			});
-			lines.push("");
-		}
-
-		// Retention reason
-		if (unit.metadata.retentionReason) {
-			lines.push(this.sectionHeading("Retention reason"));
-			lines.push(this.theme.fg("dim", unit.metadata.retentionReason));
-			lines.push("");
-		}
-
-		// Show retention summary when toggle is enabled
-		if (this.showRetentionInfo) {
-			lines.push(this.theme.fg("warning", "─".repeat(this.config.sectionRuleWidth)));
-			lines.push(this.theme.bold(this.theme.fg("warning", "Retention analysis")));
-			const retentionSummary = generateRetentionSummary(unit);
-			retentionSummary.split("\n").forEach((line) => {
-				lines.push(this.theme.fg("dim", line));
-			});
-			lines.push("");
-			lines.push(this.theme.fg("dim", "press r to hide retention analysis"));
-		}
 
 		return lines;
 	}
@@ -562,7 +525,7 @@ export class ManageContextView implements Component {
 		lines.push(
 			this.theme.fg(
 				"dim",
-				`${unit.metadata.type}  ·  ${unit.timestamp}  ·  ${unit.tokenEstimate} tok  ·  importance ${unit.metadata.importanceScore}/100`,
+				`${unit.metadata.type}  ·  ${unit.timestamp}  ·  ${unit.tokenEstimate} tok`,
 			),
 		);
 		lines.push(this.theme.fg("border", "─".repeat(this.config.sectionRuleWidth)));
@@ -584,15 +547,6 @@ export class ManageContextView implements Component {
 			lines.push("");
 		}
 
-		// Key facts
-		if (unit.metadata.keyFacts && unit.metadata.keyFacts.length > 0) {
-			lines.push(this.sectionHeading("Key facts"));
-			unit.metadata.keyFacts.forEach((fact) => {
-				lines.push(`  ${this.theme.fg("accent", "•")} ${fact}`);
-			});
-			lines.push("");
-		}
-
 		// Content
 		lines.push(this.sectionHeading("Content"));
 		const contentLines = unit.metadata.summary.split("\n");
@@ -605,24 +559,6 @@ export class ManageContextView implements Component {
 		}
 		lines.push("");
 
-		// Retention reason
-		if (unit.metadata.retentionReason) {
-			lines.push(this.sectionHeading("Retention reason"));
-			lines.push(this.theme.fg("dim", unit.metadata.retentionReason));
-			lines.push("");
-		}
-
-		// Retention summary
-		if (this.showRetentionInfo) {
-			lines.push(this.theme.fg("warning", "─".repeat(this.config.sectionRuleWidth)));
-			lines.push(this.theme.bold(this.theme.fg("warning", "Retention analysis")));
-			const retentionSummary = generateRetentionSummary(unit);
-			retentionSummary.split("\n").forEach((line) => {
-				lines.push(this.theme.fg("dim", line));
-			});
-			lines.push("");
-			lines.push(this.theme.fg("dim", "press r to hide retention analysis"));
-		}
 
 		lines.push(this.theme.fg("dim", "press m to switch to compact view"));
 
@@ -717,9 +653,6 @@ export class ManageContextView implements Component {
 				matchesKey(data, "ctrl+c")
 			) {
 				this.previewGroupId = null;
-			} else if (matchesKey(data, "r")) {
-				// Toggle retention info display
-				this.showRetentionInfo = !this.showRetentionInfo;
 			} else if (matchesKey(data, "m")) {
 				// Toggle preview mode (compact/detailed)
 				this.previewMode = this.previewMode === "compact" ? "detailed" : "compact";
@@ -772,9 +705,9 @@ export class ManageContextView implements Component {
 		else if (matchesKey(data, "down")) this.moveCursor(1);
 		else if (matchesKey(data, "pageUp")) this.moveCursor(-this.maxVisible);
 		else if (matchesKey(data, "pageDown")) this.moveCursor(this.maxVisible);
-		else if (matchesKey(data, "space")) this.setMark(this.currentUnit().groupId, "unselected");
-		else if (matchesKey(data, "c")) this.setMark(this.currentUnit().groupId, "compressed");
-		else if (matchesKey(data, "d")) this.setMark(this.currentUnit().groupId, "deleted");
+		else if (matchesKey(data, "space")) this.setMark(this.currentUnit().groupId, "toggle-unselected");
+		else if (matchesKey(data, "c")) this.setMark(this.currentUnit().groupId, "toggle-compressed");
+		else if (matchesKey(data, "d")) this.setMark(this.currentUnit().groupId, "toggle-deleted");
 		else if (matchesKey(data, "right")) {
 			this.previewGroupId = this.currentUnit().groupId;
 			this.previewScrollTop = 0;
@@ -808,57 +741,39 @@ export class ManageContextView implements Component {
 		void this.runCompressions(toCompress);
 	}
 
-	/**
-	 * Export current context as markdown.
-	 */
-	private exportToMarkdown(): void {
-		// This would be called from a separate export command
-		// For now, we'll just note that this method exists
-		// to be used by the main extension entry point
+	/** Compression worker wiring: queue events drive the log/progress; marks resolve through the queue. */
+	private buildQueue(): CompressionQueue {
+		return new CompressionQueue(
+			async (unit) => {
+				const model = await resolveCompressionModel(this.ctx, this.state);
+				if (!model) throw new Error("no model available");
+				return compressUnit(unit, model, this.ctx, this.abortController.signal);
+			},
+			(event, progress) => this.onCompressionEvent(event, progress),
+			defaultResolveMark(this.state),
+		);
+	}
+
+	private onCompressionEvent(event: CompressionEvent, progress: { done: number; total: number }): void {
+		const preview = oneLine(event.unit.preview, this.config.logPreviewMaxWidth);
+		if (event.kind === "done") {
+			this.log.push({
+				text: `✓ ${preview} — ${event.unit.tokenEstimate} → ~${event.compressedTokenEstimate} tok`,
+				kind: "ok",
+			});
+		} else if (event.kind === "cancelled") {
+			this.log.push({ text: `– ${preview} — cancelled`, kind: "info" });
+		} else {
+			this.log.push({ text: `✕ ${preview} — ${event.message}`, kind: "error" });
+		}
+		this.progressDone = progress.done;
+		saveState(this.pi, this.state);
+		this.tui.requestRender();
 	}
 
 	private async runCompressions(units: TurnUnit[]): Promise<void> {
-		const model = await resolveCompressionModel(this.ctx, this.state);
-		for (const unit of units) {
-			if (this.cancelled) break;
-			if (!model) {
-				this.log.push({ text: `✕ ${unit.preview} — no model available`, kind: "error" });
-				this.progressDone++;
-				this.tui.requestRender();
-				continue;
-			}
-			try {
-				const compressedText = await compressUnit(unit, model, this.ctx, this.abortController.signal);
-				const info = this.state.marks[unit.groupId] ?? { mark: "compressed" as Mark };
-				// Compaction succeeded and is now baked into context via
-				// compressedText (see buildFilteredMessages); the pending
-				// "compress this" mark is resolved, so the entry goes back to
-				// the normal "selected" state in the menu.
-				info.mark = "selected";
-				info.compressedText = compressedText;
-				info.compressedAt = new Date().toISOString();
-				info.originalTokenEstimate = unit.tokenEstimate;
-				info.compressedTokenEstimate = Math.ceil(compressedText.length / 4);
-				this.state.marks[unit.groupId] = info;
-				this.log.push({
-					text: `✓ ${oneLine(unit.preview, this.config.logPreviewMaxWidth)} — ${unit.tokenEstimate} → ~${info.compressedTokenEstimate} tok`,
-					kind: "ok",
-				});
-			} catch (err) {
-				if (this.cancelled) {
-					this.log.push({ text: `– ${oneLine(unit.preview, this.config.logPreviewMaxWidth)} — cancelled`, kind: "info" });
-				} else {
-					const message = err instanceof Error ? err.message : String(err);
-					this.log.push({ text: `✕ ${oneLine(unit.preview, this.config.logPreviewMaxWidth)} — ${message}`, kind: "error" });
-				}
-				// leave the mark as-is (still "compressed" but with no
-				// compressedText); buildFilteredMessages() falls back to the
-				// original content whenever compressedText is missing.
-			}
-			this.progressDone++;
-			saveState(this.pi, this.state);
-			this.tui.requestRender();
-		}
+		this.queue = this.buildQueue();
+		await this.queue.run(units);
 		this.done();
 	}
 }

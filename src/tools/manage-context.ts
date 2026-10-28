@@ -12,6 +12,11 @@
  * that produced or consumed poem content while still catching the
  * surrounding user/assistant turns.
  *
+ * Mutating actions report what they matched BEFORE changing it — heading
+ * and mark per affected unit — so the model sees what its textMatch
+ * actually selected instead of discovering collateral matches after the
+ * fact.
+ *
  * Deliberately scoped to select/unselected only: compress costs an extra LLM
  * call and delete is irreversible, so both stay picker-only (human
  * confirmation via Esc) for now. Marks written here are picked up by the
@@ -27,8 +32,9 @@ import {
 	type ManageContextParams,
 } from "../tool_definitions/manage-context.ts";
 import { loadState, saveState, type ManageContextState } from "../state.ts";
-import { buildTurnUnits, type TurnUnit } from "../turn-units.ts";
+import { buildTurnUnits, oneLine, type TurnUnit } from "../turn-units.ts";
 import { toLLMMemoryEntry } from "../llm-export.ts";
+import { describeMark } from "../mark-status.ts";
 
 export interface ManageContextRunResult {
 	content: [{ type: "text"; text: string }];
@@ -53,6 +59,15 @@ export function unitMatches(unit: TurnUnit, textMatch: string | undefined, group
 	return byText || byId;
 }
 
+/** Short per-unit line describing what a mutating action is about to change. */
+function previewUnits(units: TurnUnit[], state: ManageContextState): Array<{ id: string; heading: string; was: string }> {
+	return units.map((unit) => ({
+		id: unit.groupId,
+		heading: oneLine(unit.metadata.heading, 80),
+		was: describeMark(unit, state).effective,
+	}));
+}
+
 /**
  * Plain function: no ExtensionAPI/ExtensionContext involved. Takes the turn
  * units and persisted state the caller already fetched, mutates state.marks
@@ -74,7 +89,7 @@ export function runManageContext(units: TurnUnit[], state: ManageContextState, p
 			// and the pre-compression original, or the model will reason about
 			// content it never actually sees.
 			if (info?.compressedText) return { ...entry, mark: "compressed" as const, content: info.compressedText };
-			return { ...entry, mark: info?.mark ?? "selected" };
+			return { ...entry, mark: describeMark(u, state).raw };
 		});
 		return {
 			content: [{ type: "text", text: JSON.stringify(rows, null, 2) }],
@@ -92,24 +107,32 @@ export function runManageContext(units: TurnUnit[], state: ManageContextState, p
 	}
 
 	const targetMark = params.action === "select" ? "selected" : "unselected";
+	const matched = units.filter((unit) => unitMatches(unit, params.textMatch, params.groupIds));
+
+	// Show what the match hits before (and while) changing it: a broad
+	// textMatch can hit units the model didn't intend (e.g. every unit whose
+	// tool *result* contains the word "error"), and the per-unit preview lets
+	// the model notice and correct that in the same turn.
+	const previews = previewUnits(matched, state);
 	const affected: string[] = [];
-	for (const unit of units) {
-		if (!unitMatches(unit, params.textMatch, params.groupIds)) continue;
+	for (const unit of matched) {
 		const existing = state.marks[unit.groupId];
 		state.marks[unit.groupId] = { ...existing, mark: targetMark };
 		affected.push(unit.groupId);
 	}
 
+	const lines: string[] = [];
+	if (affected.length === 0) {
+		lines.push("No turn units matched — nothing changed.");
+	} else {
+		lines.push(`Marked ${affected.length} unit(s) as ${targetMark}:`);
+		for (const preview of previews) {
+			lines.push(`  ${preview.id}  ${preview.heading}  (was: ${preview.was})`);
+		}
+	}
+
 	return {
-		content: [
-			{
-				type: "text",
-				text:
-					affected.length === 0
-						? "No turn units matched — nothing changed."
-						: `Marked ${affected.length} unit(s) as ${targetMark}: ${affected.join(", ")}`,
-			},
-		],
+		content: [{ type: "text", text: lines.join("\n") }],
 		details: affected,
 		changed: affected.length > 0,
 	};
@@ -121,7 +144,7 @@ function buildManageContextToolImpl(pi: ExtensionAPI, definition: typeof MANAGE_
 		async execute(_toolCallId, params: ManageContextParams, _signal, _onUpdate, ctx: ExtensionContext) {
 			const entries = ctx.sessionManager.buildContextEntries();
 			const state = loadState(ctx);
-			const units = buildTurnUnits(entries).filter((u) => state.marks[u.groupId]?.mark !== "deleted");
+			const units = buildTurnUnits(entries).filter((u) => describeMark(u, state).effective !== "deleted");
 
 			const result = runManageContext(units, state, params, definition.name);
 			if (result.changed) {
@@ -130,7 +153,7 @@ function buildManageContextToolImpl(pi: ExtensionAPI, definition: typeof MANAGE_
 				// next turn (see the "context" handler in index.ts) — surface it so
 				// a human watching the session has a visible trail of the agent
 				// editing its own context, instead of content just disappearing.
-				ctx.ui.notify(`${definition.name}: ${result.content[0].text}`, "info");
+				ctx.ui.notify(`${definition.name}: ${result.content[0].text.split("\n")[0]}`, "info");
 			}
 
 			return { content: result.content, details: result.details };
