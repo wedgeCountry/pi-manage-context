@@ -19,11 +19,13 @@ no network or credentials needed. Covers:
 
 ### self-test-extension.test.ts
 
-The same agent-loop shape, but against a **real LLM**. These tests run when a
-provider API key is configured (any of `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
-`MISTRAL_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `DEEPSEEK_API_KEY`,
-`XAI_API_KEY`, `GROQ_API_KEY`) and skip otherwise, so `npm test` stays green
-offline.
+The same agent-loop shape, but against a **real LLM**, using the global pi
+setup: `~/.pi/agent/settings.json` for the default provider/model,
+`~/.pi/agent/auth.json` for credentials (via `ModelRuntime.create()` and
+`SettingsManager.create()`, not in-memory stubs). These tests run when a
+provider credential is available — an env API key (`ANTHROPIC_API_KEY`,
+`OPENAI_API_KEY`, `MISTRAL_API_KEY`, ...) or a stored `/login` credential in
+auth.json — and skip otherwise, so `npm test` stays green offline.
 
 ### integration.test.ts
 

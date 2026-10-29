@@ -1,12 +1,27 @@
 import { describe, it, expect } from "vitest";
+import {
+    createAgentSession,
+    DefaultResourceLoader,
+    getAgentDir,
+    ModelRuntime,
+    readStoredCredential,
+    SessionManager,
+    SettingsManager,
+} from "@earendil-works/pi-coding-agent";
 
-// These tests prompt a real LLM through the pi SDK and need provider
-// credentials. They run when any provider API key is configured (env or
-// ~/.pi/agent/auth.json) and skip otherwise, so `npm test` stays green
+// These tests prompt a real LLM through the pi SDK, using the global pi
+// setup: ~/.pi/agent/settings.json picks the default provider/model, and
+// ~/.pi/agent/auth.json + models.json provide credentials and custom
+// models. ModelRuntime.create() already reads auth.json/models.json from
+// the agent dir; SettingsManager must be the real (non-in-memory) one for
+// the settings.json default model to apply.
+//
+// They run when a provider credential is available — an env API key or a
+// stored entry in auth.json — and skip otherwise, so `npm test` stays green
 // offline. tests/agent-sdk-faux.test.ts covers the same agent loop with a
 // scripted faux model.
-const hasProviderKey = () =>
-    [
+const hasProviderCredential = () => {
+    const envKeys = [
         "ANTHROPIC_API_KEY",
         "OPENAI_API_KEY",
         "MISTRAL_API_KEY",
@@ -15,17 +30,52 @@ const hasProviderKey = () =>
         "DEEPSEEK_API_KEY",
         "XAI_API_KEY",
         "GROQ_API_KEY",
-    ].some((name) => Boolean(process.env[name]));
+    ];
+    if (envKeys.some((name) => Boolean(process.env[name]))) return true;
+    // Credentials stored in the global pi dir via /login (auth.json).
+    const stored = [
+        "anthropic",
+        "openai",
+        "mistral",
+        "google",
+        "openrouter",
+        "deepseek",
+        "xai",
+        "groq",
+    ];
+    return stored.some((provider) => readStoredCredential(provider) !== undefined);
+};
 
-const maybeIt = hasProviderKey() ? it : it.skip;
-import {
-    createAgentSession,
-    DefaultResourceLoader,
-    getAgentDir,
-    ModelRuntime,
-    SessionManager,
-    SettingsManager,
-} from "@earendil-works/pi-coding-agent";
+const maybeIt = hasProviderCredential() ? it : it.skip;
+import extension from "../index.ts";
+import { loadState } from "../src/state.ts";
+import { buildTurnUnits } from "../src/turn-units.ts";
+import { buildFilteredMessages } from "../src/context-filter.ts";
+
+/** Settings from the global pi dir (~/.pi/agent/settings.json), not in-memory. */
+const createGlobalSettingsManager = () => SettingsManager.create(process.cwd(), getAgentDir());
+
+/** Session helper shared by both real-LLM tests: global settings + credentials. */
+async function createGlobalSession() {
+    const settingsManager = createGlobalSettingsManager();
+    const loader = new DefaultResourceLoader({
+        cwd: process.cwd(),
+        agentDir: getAgentDir(),
+        settingsManager,
+        noExtensions: true,
+        noSkills: true,
+        extensionFactories: [extension],
+    });
+    await loader.reload();
+
+    return createAgentSession({
+        modelRuntime: await ModelRuntime.create(),
+        resourceLoader: loader,
+        sessionManager: SessionManager.inMemory(),
+        settingsManager,
+        noTools: "builtin", // only extension tools are available
+    });
+}
 import extension from "../index.ts";
 import { loadState } from "../src/state.ts";
 import { buildTurnUnits } from "../src/turn-units.ts";
@@ -33,24 +83,7 @@ import { buildFilteredMessages } from "../src/context-filter.ts";
 
 describe("extension (integration)", () => {
     maybeIt("agent calls the view_context tool successfully", async () => {
-        const settingsManager = SettingsManager.inMemory();
-        const loader = new DefaultResourceLoader({
-            cwd: process.cwd(),
-            agentDir: getAgentDir(),
-            settingsManager,
-            noExtensions: true,
-            noSkills: true,
-            extensionFactories: [extension],
-        });
-        await loader.reload();
-
-        const { session } = await createAgentSession({
-            modelRuntime: await ModelRuntime.create(),
-            resourceLoader: loader,
-            sessionManager: SessionManager.inMemory(),
-            settingsManager,
-            noTools: "builtin", // only extension tools are available
-        });
+        const { session } = await createGlobalSession();
 
         const calls: { toolName: string; isError: boolean }[] = [];
         session.subscribe((e) => {
@@ -74,24 +107,7 @@ describe("extension (integration)", () => {
 
 describe("extension (unselect integration)", () => {
     maybeIt("agent calls the manage-context tool successfully unselecting all messages", async () => {
-        const settingsManager = SettingsManager.inMemory();
-        const loader = new DefaultResourceLoader({
-            cwd: process.cwd(),
-            agentDir: getAgentDir(),
-            settingsManager,
-            noExtensions: true,
-            noSkills: true,
-            extensionFactories: [extension],
-        });
-        await loader.reload();
-
-        const { session } = await createAgentSession({
-            modelRuntime: await ModelRuntime.create(),
-            resourceLoader: loader,
-            sessionManager: SessionManager.inMemory(),
-            settingsManager,
-            noTools: "builtin", // only extension tools are available
-        });
+        const { session } = await createGlobalSession();
 
         const calls: { toolName: string; isError: boolean }[] = [];
         session.subscribe((e) => {
