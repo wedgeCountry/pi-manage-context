@@ -6,6 +6,33 @@ This test suite provides comprehensive coverage for the context management tools
 
 ## Test Files
 
+### agent-sdk-faux.test.ts
+
+Drives the full pi SDK agent loop (`createAgentSession` → `session.prompt` → tool
+execution → tool result → next model turn) with pi-ai's **Faux** model as the LLM.
+The faux provider's scripted responses issue real `view_context` and `manage-context`
+tool calls, so the tools execute against a real `AgentSession`/`SessionManager` —
+no network or credentials needed. Covers:
+- `view_context` called through the whole loop, session entries grow
+- `manage-context` unselect: marks persist in state and `buildFilteredMessages`
+  shrinks the model-visible context
+
+### self-test-extension.test.ts
+
+The same agent-loop shape, but against a **real LLM**, using the global pi
+setup: `~/.pi/agent/settings.json` for the default provider/model,
+`~/.pi/agent/auth.json` for credentials (via `ModelRuntime.create()` and
+`SettingsManager.create()`, not in-memory stubs). These tests run when a
+provider credential is available — an env API key (`ANTHROPIC_API_KEY`,
+`OPENAI_API_KEY`, `MISTRAL_API_KEY`, ...) or a stored `/login` credential in
+auth.json — and skip otherwise, so `npm test` stays green offline.
+
+### integration.test.ts
+
+Not a vitest file — a pi selftest *extension script* (registers `my_tool` and a
+nested-agent `run_selftest`) meant to be loaded interactively with
+`pi -e`. Vitest reports "No test suite found" for it; that is expected.
+
 ### view-context-tool.test.ts
 
 Tests for the `view_context` tool covering:

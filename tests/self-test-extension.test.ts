@@ -4,34 +4,86 @@ import {
     DefaultResourceLoader,
     getAgentDir,
     ModelRuntime,
+    readStoredCredential,
     SessionManager,
     SettingsManager,
 } from "@earendil-works/pi-coding-agent";
+
+// These tests prompt a real LLM through the pi SDK, using the global pi
+// setup: ~/.pi/agent/settings.json picks the default provider/model, and
+// ~/.pi/agent/auth.json + models.json provide credentials and custom
+// models. ModelRuntime.create() already reads auth.json/models.json from
+// the agent dir; SettingsManager must be the real (non-in-memory) one for
+// the settings.json default model to apply.
+//
+// They run when a provider credential is available — an env API key or a
+// stored entry in auth.json — and skip otherwise, so `npm test` stays green
+// offline. tests/agent-sdk-faux.test.ts covers the same agent loop with a
+// scripted faux model.
+const hasProviderCredential = () => {
+    const envKeys = [
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "MISTRAL_API_KEY",
+        "GEMINI_API_KEY",
+        "OPENROUTER_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "XAI_API_KEY",
+        "GROQ_API_KEY",
+    ];
+    if (envKeys.some((name) => Boolean(process.env[name]))) return true;
+    // Credentials stored in the global pi dir via /login (auth.json).
+    const stored = [
+        "anthropic",
+        "openai",
+        "mistral",
+        "google",
+        "openrouter",
+        "deepseek",
+        "xai",
+        "groq",
+    ];
+    return stored.some((provider) => readStoredCredential(provider) !== undefined);
+};
+
+const maybeIt = hasProviderCredential() ? it : it.skip;
+import extension from "../index.ts";
+import { loadState } from "../src/state.ts";
+import { buildTurnUnits } from "../src/turn-units.ts";
+import { buildFilteredMessages } from "../src/context-filter.ts";
+
+/** Settings from the global pi dir (~/.pi/agent/settings.json), not in-memory. */
+const createGlobalSettingsManager = () => SettingsManager.create(process.cwd(), getAgentDir());
+
+/** Session helper shared by both real-LLM tests: global settings + credentials. */
+async function createGlobalSession() {
+    const settingsManager = createGlobalSettingsManager();
+    const loader = new DefaultResourceLoader({
+        cwd: process.cwd(),
+        agentDir: getAgentDir(),
+        settingsManager,
+        noExtensions: true,
+        noSkills: true,
+        extensionFactories: [extension],
+    });
+    await loader.reload();
+
+    return createAgentSession({
+        modelRuntime: await ModelRuntime.create(),
+        resourceLoader: loader,
+        sessionManager: SessionManager.inMemory(),
+        settingsManager,
+        noTools: "builtin", // only extension tools are available
+    });
+}
 import extension from "../index.ts";
 import { loadState } from "../src/state.ts";
 import { buildTurnUnits } from "../src/turn-units.ts";
 import { buildFilteredMessages } from "../src/context-filter.ts";
 
 describe("extension (integration)", () => {
-    it("agent calls the view_context tool successfully", async () => {
-        const settingsManager = SettingsManager.inMemory();
-        const loader = new DefaultResourceLoader({
-            cwd: process.cwd(),
-            agentDir: getAgentDir(),
-            settingsManager,
-            noExtensions: true,
-            noSkills: true,
-            extensionFactories: [extension],
-        });
-        await loader.reload();
-
-        const { session } = await createAgentSession({
-            modelRuntime: await ModelRuntime.create(),
-            resourceLoader: loader,
-            sessionManager: SessionManager.inMemory(),
-            settingsManager,
-            noTools: "builtin", // only extension tools are available
-        });
+    maybeIt("agent calls the view_context tool successfully", async () => {
+        const { session } = await createGlobalSession();
 
         const calls: { toolName: string; isError: boolean }[] = [];
         session.subscribe((e) => {
@@ -54,25 +106,8 @@ describe("extension (integration)", () => {
 });
 
 describe("extension (unselect integration)", () => {
-    it("agent calls the manage-context tool successfully unselecting all messages", async () => {
-        const settingsManager = SettingsManager.inMemory();
-        const loader = new DefaultResourceLoader({
-            cwd: process.cwd(),
-            agentDir: getAgentDir(),
-            settingsManager,
-            noExtensions: true,
-            noSkills: true,
-            extensionFactories: [extension],
-        });
-        await loader.reload();
-
-        const { session } = await createAgentSession({
-            modelRuntime: await ModelRuntime.create(),
-            resourceLoader: loader,
-            sessionManager: SessionManager.inMemory(),
-            settingsManager,
-            noTools: "builtin", // only extension tools are available
-        });
+    maybeIt("agent calls the manage-context tool successfully unselecting all messages", async () => {
+        const { session } = await createGlobalSession();
 
         const calls: { toolName: string; isError: boolean }[] = [];
         session.subscribe((e) => {
