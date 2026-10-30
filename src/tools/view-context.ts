@@ -16,8 +16,9 @@ import { VIEW_CONTEXT_TOOL_DEFINITION, type ViewContextParams } from "../tool_de
 import { loadState, type ManageContextState } from "../state.ts";
 import { buildTurnUnits, type TurnUnit } from "../turn-units.ts";
 import { toLLMMemoryEntry } from "../llm-export.ts";
+import { describeMark } from "../mark-status.ts";
 
-export function formatSummary(units: TurnUnit[], state: ManageContextState, showRetention: boolean): string {
+export function formatSummary(units: TurnUnit[], state: ManageContextState): string {
 	const lines: string[] = [];
 
 	lines.push("═".repeat(60));
@@ -43,10 +44,10 @@ export function formatSummary(units: TurnUnit[], state: ManageContextState, show
 	lines.push(`Total tokens: ~${totalTokens}`);
 
 	const marks = {
-		selected: units.filter((u) => state.marks[u.groupId]?.mark === "selected" || !state.marks[u.groupId]).length,
-		unselected: units.filter((u) => state.marks[u.groupId]?.mark === "unselected").length,
-		compressed: units.filter((u) => state.marks[u.groupId]?.compressedText).length,
-		deleted: units.filter((u) => state.marks[u.groupId]?.mark === "deleted").length,
+		selected: units.filter((u) => describeMark(u, state).effective === "selected").length,
+		unselected: units.filter((u) => describeMark(u, state).effective === "unselected").length,
+		compressed: units.filter((u) => describeMark(u, state).effective === "compressed").length,
+		deleted: units.filter((u) => describeMark(u, state).effective === "deleted").length,
 	};
 
 	lines.push("");
@@ -62,35 +63,15 @@ export function formatSummary(units: TurnUnit[], state: ManageContextState, show
 	lines.push("─".repeat(60));
 
 	units.forEach((unit, idx) => {
-		const mark = state.marks[unit.groupId]?.mark ?? "selected";
-		const isCompressed = !!state.marks[unit.groupId]?.compressedText;
-		const markSymbol = isCompressed
-			? "▤"
-			: mark === "selected"
-				? "●"
-				: mark === "unselected"
-					? "○"
-					: mark === "deleted"
-						? "✕"
-						: "•";
-
-		const markColor = isCompressed ? "[compressed]" : mark === "selected" ? "" : mark === "unselected" ? "[hidden]" : mark === "deleted" ? "[deleted]" : "";
+		const { symbol, label } = describeMark(unit, state);
 
 		lines.push("");
-		lines.push(`${idx + 1}. ${markSymbol} ${unit.metadata.heading} ${markColor}`);
+		lines.push(`${idx + 1}. ${symbol} ${unit.metadata.heading}${label ? ` ${label}` : ""}`);
 		lines.push(`   Type: ${unit.kind}  •  ${unit.tokenEstimate} tokens  •  ${new Date(unit.timestamp).toLocaleTimeString()}`);
-
-		if (showRetention && unit.metadata.retentionReason) {
-			lines.push(`   Retention: ${unit.metadata.retentionReason}`);
-		}
 
 		if (unit.metadata.toolCalls && unit.metadata.toolCalls.length > 0) {
 			const toolNames = unit.metadata.toolCalls.map((tc) => tc.name).join(", ");
 			lines.push(`   Tools: ${toolNames}`);
-		}
-
-		if (unit.metadata.keyFacts && unit.metadata.keyFacts.length > 0) {
-			lines.push(`   Key facts: ${unit.metadata.keyFacts.slice(0, 3).join("; ")}${unit.metadata.keyFacts.length > 3 ? "..." : ""}`);
 		}
 	});
 
@@ -100,37 +81,7 @@ export function formatSummary(units: TurnUnit[], state: ManageContextState, show
 	return lines.join("\n");
 }
 
-export function generateRetentionAnalysis(unit: TurnUnit): string {
-	const parts: string[] = [];
-
-	if (unit.kind === "user") {
-		parts.push("User instruction or query");
-	}
-
-	if (unit.metadata.toolCalls && unit.metadata.toolCalls.length > 0) {
-		const hasErrors = unit.metadata.toolCalls.some((tc) => tc.description?.includes("✗") || tc.description?.includes("error"));
-		const hasFileOps = unit.metadata.toolCalls.some((tc) => tc.name === "read" || tc.name === "write" || tc.name === "edit");
-
-		if (hasErrors) {
-			parts.push("Contains error information that may be needed for debugging");
-		}
-		if (hasFileOps) {
-			parts.push("Contains file operations that document code changes");
-		}
-	}
-
-	if (unit.metadata.keyFacts && unit.metadata.keyFacts.length > 0) {
-		parts.push(`Contains ${unit.metadata.keyFacts.length} key factual elements`);
-	}
-
-	if (unit.metadata.importanceScore >= 80) {
-		parts.push("High importance score suggests critical context");
-	}
-
-	return parts.length > 0 ? parts.join("; ") : "Standard conversation flow";
-}
-
-export function formatDetailed(units: TurnUnit[], state: ManageContextState, showRetention: boolean): string {
+export function formatDetailed(units: TurnUnit[], state: ManageContextState): string {
 	const lines: string[] = [];
 
 	lines.push("═".repeat(80));
@@ -139,8 +90,7 @@ export function formatDetailed(units: TurnUnit[], state: ManageContextState, sho
 	lines.push("");
 
 	units.forEach((unit, idx) => {
-		const mark = state.marks[unit.groupId]?.mark ?? "selected";
-		const isCompressed = !!state.marks[unit.groupId]?.compressedText;
+		const { effective, info } = describeMark(unit, state);
 
 		lines.push("─".repeat(80));
 		lines.push(`ENTRY ${idx + 1}`);
@@ -150,12 +100,9 @@ export function formatDetailed(units: TurnUnit[], state: ManageContextState, sho
 		lines.push(`Heading: ${unit.metadata.heading}`);
 		lines.push(`Timestamp: ${unit.timestamp}`);
 		lines.push(`Tokens: ${unit.tokenEstimate}`);
-		lines.push(`Status: ${isCompressed ? "compressed" : mark}${isCompressed ? ` (${state.marks[unit.groupId]?.originalTokenEstimate} → ${state.marks[unit.groupId]?.compressedTokenEstimate} tokens)` : ""}`);
-		lines.push(`Importance: ${unit.metadata.importanceScore}/100`);
-
-		if (unit.metadata.retentionReason) {
-			lines.push(`Retention reason: ${unit.metadata.retentionReason}`);
-		}
+		lines.push(
+			`Status: ${effective}${info?.compressedText ? ` (${info.originalTokenEstimate} → ${info.compressedTokenEstimate} tokens)` : ""}`,
+		);
 
 		if (unit.metadata.toolCalls && unit.metadata.toolCalls.length > 0) {
 			lines.push("");
@@ -163,31 +110,17 @@ export function formatDetailed(units: TurnUnit[], state: ManageContextState, sho
 			unit.metadata.toolCalls.forEach((tc, tIdx) => {
 				lines.push(`  ${tIdx + 1}. ${tc.name}(${JSON.stringify(tc.arguments)})`);
 				if (tc.result) {
-					const resultPreview = tc.result.length > 100 ? tc.result.slice(0, 100) + "..." : tc.result;
+					const resultPreview = tc.result.length > 100 ? `${tc.result.slice(0, 100)}...` : tc.result;
 					lines.push(`     Result: ${tc.description || resultPreview}`);
 				}
 			});
-		}
-
-		if (unit.metadata.keyFacts && unit.metadata.keyFacts.length > 0) {
-			lines.push("");
-			lines.push("Key facts:");
-			unit.metadata.keyFacts.forEach((fact) => {
-				lines.push(`  • ${fact}`);
-			});
-		}
-
-		if (showRetention) {
-			lines.push("");
-			lines.push("Retention analysis:");
-			lines.push(`  ${generateRetentionAnalysis(unit)}`);
 		}
 
 		lines.push("");
 		lines.push("Content preview:");
 		const previewLines = unit.metadata.summary.split("\n").slice(0, 5);
 		previewLines.forEach((line) => {
-			const truncated = line.length > 100 ? line.slice(0, 100) + "..." : line;
+			const truncated = line.length > 100 ? `${line.slice(0, 100)}...` : line;
 			lines.push(`  ${truncated}`);
 		});
 		if (unit.metadata.summary.split("\n").length > 5) {
@@ -207,16 +140,15 @@ export function formatDetailed(units: TurnUnit[], state: ManageContextState, sho
 export function formatLLMJSON(units: TurnUnit[], state: ManageContextState): string {
 	const entries = units.map((unit) => {
 		const entry = toLLMMemoryEntry(unit);
-		const mark = state.marks[unit.groupId]?.mark ?? "selected";
-		const isCompressed = !!state.marks[unit.groupId]?.compressedText;
+		const { effective, info } = describeMark(unit, state);
 
 		return {
 			...entry,
-			status: isCompressed ? "compressed" : mark,
-			compression: isCompressed
+			status: effective,
+			compression: info?.compressedText
 				? {
-						originalTokens: state.marks[unit.groupId]?.originalTokenEstimate,
-						compressedTokens: state.marks[unit.groupId]?.compressedTokenEstimate,
+						originalTokens: info.originalTokenEstimate,
+						compressedTokens: info.compressedTokenEstimate,
 					}
 				: undefined,
 		};
@@ -234,10 +166,10 @@ export function formatLLMJSON(units: TurnUnit[], state: ManageContextState): str
 					custom: units.filter((u) => u.kind === "custom_message").length,
 				},
 				byStatus: {
-					selected: units.filter((u) => state.marks[u.groupId]?.mark === "selected" || !state.marks[u.groupId]).length,
-					unselected: units.filter((u) => state.marks[u.groupId]?.mark === "unselected").length,
-					compressed: units.filter((u) => state.marks[u.groupId]?.compressedText).length,
-					deleted: units.filter((u) => state.marks[u.groupId]?.mark === "deleted").length,
+					selected: entries.filter((e) => e.status === "selected").length,
+					unselected: entries.filter((e) => e.status === "unselected").length,
+					compressed: entries.filter((e) => e.status === "compressed").length,
+					deleted: entries.filter((e) => e.status === "deleted").length,
 				},
 			},
 			entries,
@@ -263,19 +195,18 @@ export function buildContextOverview(units: TurnUnit[], state: ManageContextStat
 	}
 
 	const format = params.format ?? "summary";
-	const showRetention = params.showRetention ?? false;
 
 	let text: string;
 	switch (format) {
 		case "detailed":
-			text = formatDetailed(units, state, showRetention);
+			text = formatDetailed(units, state);
 			break;
 		case "llm-json":
 			text = formatLLMJSON(units, state);
 			break;
 		case "summary":
 		default:
-			text = formatSummary(units, state, showRetention);
+			text = formatSummary(units, state);
 			break;
 	}
 
@@ -299,7 +230,7 @@ export function buildViewContextTool(): ToolDefinition<typeof VIEW_CONTEXT_TOOL_
 			const state = loadState(ctx);
 			let units = buildTurnUnits(entries);
 			if (!includeDeleted) {
-				units = units.filter((u) => state.marks[u.groupId]?.mark !== "deleted");
+				units = units.filter((u) => describeMark(u, state).effective !== "deleted");
 			}
 
 			const { text, details } = buildContextOverview(units, state, params);

@@ -1,4 +1,10 @@
 import { describe, it, expect } from "vitest";
+
+// These tests drive a real (headless) pi agent session, which needs a
+// configured model/provider. Skip automatically offline so `npm test` stays
+// green for contributors without credentials.
+const hasProviderAuth = Boolean(process.env.PI_TEST_PROVIDER_KEY || process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY);
+const maybeDescribe = hasProviderAuth ? describe : describe.skip;
 import {
     createAgentSession,
     DefaultResourceLoader,
@@ -12,7 +18,7 @@ import { loadState } from "../src/state.ts";
 import { buildTurnUnits } from "../src/turn-units.ts";
 import { buildFilteredMessages } from "../src/context-filter.ts";
 
-describe("extension (integration)", () => {
+maybeDescribe("extension (integration)", () => {
     it("agent calls the view_context tool successfully", async () => {
         const settingsManager = SettingsManager.inMemory();
         const loader = new DefaultResourceLoader({
@@ -53,7 +59,7 @@ describe("extension (integration)", () => {
     }, 60_000);
 });
 
-describe("extension (unselect integration)", () => {
+maybeDescribe("extension (unselect integration)", () => {
     it("agent calls the manage-context tool successfully unselecting all messages", async () => {
         const settingsManager = SettingsManager.inMemory();
         const loader = new DefaultResourceLoader({

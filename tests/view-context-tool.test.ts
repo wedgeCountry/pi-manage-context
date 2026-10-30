@@ -71,7 +71,6 @@ describe("view_context tool", () => {
 			expect(params.type).toBe("object");
 			expect(params.properties.format).toBeDefined();
 			expect(params.properties.includeDeleted).toBeDefined();
-			expect(params.properties.showRetention).toBeDefined();
 			
 			const formatOptions = params.properties.format.anyOf.map((opt: any) => opt.const);
 			expect(formatOptions).toEqual(["summary", "detailed", "llm-json"]);
@@ -195,18 +194,6 @@ describe("view_context tool", () => {
 			loadStateSpy.mockRestore();
 		});
 
-		it("includes retention analysis when showRetention=true in detailed format", async () => {
-			const tool = buildViewContextTool();
-			const entries: SessionEntry[] = [
-				createUserMessageEntry("entry-1", "Important requirement"),
-			];
-			const mockCtx = createMockContext(entries);
-			
-			const result = await tool.execute("test-call", { format: "detailed", showRetention: true }, undefined, undefined, mockCtx);
-			
-			const text = (result.content[0] as any).text;
-			expect(text).toContain("Retention");
-		});
 	});
 
 	describe("formatSummary function", () => {

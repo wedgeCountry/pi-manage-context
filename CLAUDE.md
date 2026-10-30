@@ -60,10 +60,48 @@ one plain function; `src/tools/manage-context.ts` exports `buildManageContextToo
 ## Other modules
 
 - `src/state.ts` — persisted extension state (marks, compression model, read-hook toggle),
-  stored as a "custom" session entry. Shared by both tools and the interactive picker.
-- `src/turn-units.ts` — groups raw session entries into `TurnUnit`s (the atomic row unit).
+  stored as a "custom" session entry. Version-migrated on load (`migrate`), pruned of dead
+  marks (`pruneMarks`), and mutated through one entry point (`updateState`) where possible.
+  Shared by both tools and the interactive picker.
+- `src/turn-units.ts` — groups raw session entries into turn units (the atomic row unit).
+  Two levels: `buildTurnUnitGroups()` (cheap, structural — used on the `"context"` hot path)
+  and `buildTurnUnits()` (groups + display metadata — used by picker/tools/export).
 - `src/context-filter.ts` — applies marks (unselected/compressed) to build the messages
-  actually sent to the model; wired into the `"context"` event in `index.ts`.
-- `src/view.ts` — the interactive `/manage_context` picker UI (not a tool).
+  actually sent to the model; wired into the `"context"` event in `index.ts`. Works on cheap
+  groups, not enriched units.
+- `src/mark-status.ts` — the single source of truth for how a unit's mark *reads* (raw vs
+  effective, glyphs, labels). Every surface (picker, view_context, manage-context, filter)
+  must report marks through `markStatus`/`describeMark`, not by re-deriving them.
+- `src/marks-controller.ts` — pure mark transitions for the picker (toggle intents in,
+  next marks out); testable without a TUI.
+- `src/compression-queue.ts` — compression orchestration (sequential runs, progress events,
+  mark resolution policy); testable with a fake compress function.
+- `src/view.ts` — the interactive `/manage_context` picker UI (not a tool). Rendering and
+  key dispatch only; mark logic and compression work live in the modules above.
 - `src/compression.ts`, `src/llm-export.ts`, `src/markdown-export.ts` — supporting logic used
-  by the picker and by the tools' `llm-json`/summary output formats.
+  by the picker and by the tools' `llm-json`/summary output formats. `markdown-export.ts` backs
+  the `/export_context` command in `index.ts`.
+
+### Metadata policy
+
+Turn units carry only honest, cheaply computed metadata (heading, type, timestamp, tool
+calls, capped summary). Do not reintroduce importance scores, "key facts", or retention
+reasons: they were regex heuristics whose fabricated numbers leaked into LLM-facing output
+and steered retention decisions worse than no numbers. If a score-like signal is needed,
+compute it at compression time with an actual LLM call.
+
+### Naming conventions
+
+- Tool names use underscores (`view_context`), except the pre-existing hyphenated
+  `manage-context` and its legacy alias `manage_context_select` (one implementation, two
+  registered names — see "One implementation, multiple registered names" above).
+- Commands use underscores: `/manage_context`, `/export_context`, `/toggle-read-hook`.
+- New tools should use underscores and not add hyphenated aliases.
+
+### Tests
+
+`npm test` must pass offline. Provider-dependent integration tests
+(`tests/self-test-extension.test.ts`) auto-skip without provider credentials
+(`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `OPENROUTER_API_KEY`). `tests/fixtures/` holds
+non-test helper sources. CI (`.github/workflows/ci.yml`) runs typecheck + tests on every
+PR.

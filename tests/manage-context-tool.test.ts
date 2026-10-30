@@ -318,7 +318,9 @@ describe("manage-context tool", () => {
 			expect(mockCtx.ui.notify).toHaveBeenCalledTimes(1);
 			const [message] = (mockCtx.ui.notify as any).mock.calls[0];
 			expect(message).toContain("unselected");
-			expect(message).toContain("entry-1");
+			// The notification is the first line of the multi-line result; the
+			// per-unit previews (with ids) go to the tool result itself.
+			expect(message).toMatch(/Marked \d+ unit\(s\) as unselected/);
 		});
 
 		it("does not notify for a list call or a no-op select/unselect", async () => {
