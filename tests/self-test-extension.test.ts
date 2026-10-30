@@ -95,9 +95,8 @@ maybeDescribe("extension (unselect integration)", () => {
             session.dispose();
         }
 
-        // The tool is registered under two names (see CLAUDE.md's "One
-        // implementation, multiple registered names") — the model is free to
-        // call either.
+        // The tool is registered under two names sharing one implementation —
+        // the model is free to call either.
         expect(calls.some((c) => c.toolName === "manage-context" || c.toolName === "manage_context_select")).toBe(
             true,
         );
