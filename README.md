@@ -1,141 +1,55 @@
 # pi-manage-context
 
-A pi extension to manage and modify context during a session.
+A pi extension to review, select, compress, or delete parts of the conversation
+context during a session — either interactively or by the agent itself.
 
-## Features
-
-### Interactive UI (`/manage_context`)
-
-Type `/manage_context` in the pi session to open an interactive picker where you can:
-
-- **Select/unselect** messages and tool results (only selected messages are visible to the agent)
-- **Compress** entries into shorter summaries (saves tokens)
-- **Delete** entries permanently (cannot be undone)
-- **Preview** full content of individual messages in a detailed view
-
-Delete and compress operations prompt for confirmation before applying.
-
-### Context Export (`/export_context`)
-
-Type `/export_context [filename.md]` to write the summarized context as a markdown file to the
-working directory. Uses a timestamped `context-export-<date>.md` name when no filename is given.
-Deleted entries are excluded — the export mirrors what the model actually sees.
-
-### Agent Tools
-
-The extension provides three tools for the AI agent to manage its own context:
-
-#### `view_context` — Get a readable overview of conversation context
-
-Creates a human-readable overview similar to what the user sees in the `/manage_context` picker. Shows all turn units with their metadata, token counts, importance scores, and current selection status.
-
-**Parameters:**
-- `format` (optional): `"summary"` (brief overview), `"detailed"` (full metadata), or `"llm-json"` (structured JSON). Defaults to `"summary"`.
-- `includeDeleted` (optional): If `true`, include entries marked as deleted. Defaults to `false`.
-
-**Example usage:**
-```
-view_context({ format: "summary" })
-view_context({ format: "detailed", showRetention: true })
-view_context({ format: "llm-json" })
-```
-
-#### `manage-context` — List/select/unselect context turns
-
-Allows the model itself to list turn units and flip their selected/unselected mark by text match or groupId, without human intervention.
-
-**Parameters:**
-- `action` (required): `"list"`, `"select"`, or `"unselect"`
-- `textMatch` (optional): Case-insensitive substring searched across heading, message text, and tool call names/arguments/results
-- `groupIds` (optional): Exact groupId(s) to affect, as reported by a `'list'` action
-
-**Example usage:**
-```
-manage-context({ action: "list" })
-manage-context({ action: "select", textMatch: "file path" })
-manage-context({ action: "unselect", groupIds: ["entry-123", "entry-456"] })
-manage-context({ action: "select", textMatch: "poem" })  // catches tool calls about poems too
-```
-
-#### `manage_context_select` — Legacy tool name
-
-Same functionality as `manage-context` (provided for backward compatibility).
-
-### Read Hook (`/toggle-read-hook`)
-
-An optional hook that automatically unselects old `read()` results of the same file to save tokens. Enable/disable with `/toggle-read-hook` (default: off).
-
-When enabled, if the agent reads a file that was already read earlier in the conversation, the previous read result is automatically unselected from context.
-
-## Installation
-
-### Install in a project
+## Install
 
 ```bash
-pi install git:github.com/wedgeCountry/pi-manage-context.git
+pi install git:github.com/wedgeCountry/pi-manage-context.git          # project
+pi install --global git:github.com/wedgeCountry/pi-manage-context.git # global
 ```
 
-### Install globally
+## Commands
 
-```bash
-pi install --global git:github.com/wedgeCountry/pi-manage-context.git
-```
+| Command | Description |
+|---|---|
+| `/manage_context` | Open the interactive picker |
+| `/manage_context <provider>/<modelId>` | Set the compression model, then open the picker |
+| `/manage_context model` | Print the configured compression model |
+| `/export_context [filename.md]` | Export the summarized context as markdown (timestamped name if omitted) |
+| `/toggle-read-hook` | Toggle auto-unselecting earlier `read()` results of the same file (default: off) |
 
-## Usage Examples
-
-### Agent workflow example
-
-```
-1. Agent calls: view_context({ format: "summary" })
-   → Sees overview of all 25 entries, 15k tokens total
-
-2. Agent calls: manage-context({ action: "list" })
-   → Gets detailed JSON with all entry metadata
-
-3. Agent calls: manage-context({ action: "unselect", textMatch: "early draft" })
-   → Unselects 3 early conversation turns
-
-4. Agent calls: manage-context({ action: "select", textMatch: "final implementation" })
-   → Ensures important entries are selected
-
-5. Next model call only sees the selected entries (reduced token count)
-```
-
-### Compression workflow (UI only)
-
-1. User types `/manage_context`
-2. Presses `c` on entries to compress (marked with ▤)
-3. Presses `Enter` to apply
-4. Confirms compression when prompted
-5. Selected entries are replaced with AI-generated summaries
-
-## Keyboard Shortcuts (UI Picker)
+## Picker keys
 
 | Key | Action |
-|-----|--------|
-| ↑/↓ | Navigate entries |
-| PageUp/PageDown | Jump by page |
-| Space | Toggle select/unselect |
-| c | Mark for compression |
-| d | Mark for deletion |
-| → | Open preview pane |
-| Enter | Apply changes |
-| Esc | Cancel / Close preview |
-| Ctrl+C | Cancel and discard changes |
+|---|---|
+| ↑/↓, PageUp/PageDown | Navigate |
+| Space / `c` / `d` | Toggle unselected / compressed / deleted |
+| →, Enter | Open preview pane |
+| Enter (in list) | Apply marks (asks for confirmation when deleting/compressing) |
+| Esc / Ctrl+C | Cancel |
 
-**Inside preview pane:**
-| Key | Action |
-|-----|--------|
-| ↑/↓ | Scroll content |
-| PageUp/PageDown | Page scroll |
-| → | Horizontal scroll |
-| Home/End | Jump to start/end |
-| ← | Close preview |
-| r | Toggle retention analysis |
-| m | Toggle preview mode (compact/detailed) |
+Inside the preview: ↑/↓/PageUp/PageDown scroll, →/Home/End horizontal scroll,
+`m` toggles compact/detailed, ← or Enter closes.
+
+Deletion is permanent. Compression replaces the original entries with an
+LLM-generated summary. Deleted entries never reappear — not in the picker, the
+export, or the model's context.
+
+## Agent tools
+
+| Tool | Purpose |
+|---|---|
+| `view_context` | Readable overview of the context: `format` = `summary` (default) / `detailed` / `llm-json`; `includeDeleted` (default `false`) |
+| `manage-context` | `action` = `list` / `select` / `unselect`, matched by `textMatch` (heading, message text, tool call name/args/result) and/or `groupIds` |
+| `manage_context_select` | Legacy alias of `manage-context`, same behavior |
+
+Unselected units are hidden from the model on its next turn but can be
+re-selected; they are not deleted.
 
 ## Architecture
 
-The extension maintains a state file tracking marks (selected/unselected/compressed/deleted) for each turn unit. The `context` event handler filters messages before they're sent to the model based on these marks. Compression replaces the original content with an LLM-generated summary.
-
-See `docs/` for detailed implementation notes.
+See [architecture.md](architecture.md) for the design decisions (turn units,
+marks, the context filter, MVVM picker). Run `npm test` and `npm run typecheck`
+for verification.
