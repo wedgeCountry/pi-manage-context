@@ -33,80 +33,22 @@
  * Grounded against @earendil-works/pi-coding-agent, @earendil-works/pi-ai and
  * @earendil-works/pi-tui — see the real .d.ts files shipped with those
  * packages for anything not covered by a comment here.
+ *
+ * This file is pure wiring: session hooks live in src/hooks.ts, slash commands
+ * in src/commands.ts, tools in src/tools/, and the picker UI in src/view.ts
+ * (render) + src/picker/picker-view-model.ts (behavior).
  */
 
-import { resolve } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import type { AutocompleteItem } from "@earendil-works/pi-tui";
-import type {
-	ContextEvent,
-	ExtensionAPI,
-	ExtensionCommandContext,
-	KeybindingsManager,
-	ToolResultEvent,
-} from "@earendil-works/pi-coding-agent";
-import { isReadToolResult } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-import { writeFile } from "node:fs/promises";
-
-import { buildFilteredMessages } from "./src/context-filter.ts";
-import { exportUnitsToMarkdown } from "./src/markdown-export.ts";
-import { loadState, saveState, hasMarks, pruneMarks } from "./src/state.ts";
-import { buildTurnUnitGroups, buildTurnUnits, type TurnUnit } from "./src/turn-units.ts";
-import { ManageContextView } from "./src/view.ts";
+import { registerCommands } from "./src/commands.ts";
+import { registerHooks } from "./src/hooks.ts";
 import { registerManageContextSelectTool, registerManageContextTool } from "./src/tools/manage-context.ts";
 import { registerViewContextTool } from "./src/tools/view-context.ts";
 
-/**
- * The manage-context tool's own tool call + result are auto-unselected right
- * after it runs (see the "tool_result" hook below) — otherwise every
- * subsequent turn would keep re-sending the tool call that was supposed to
- * shrink the context, defeating the point. Both registered names count (see
- * CLAUDE.md's "One implementation, multiple registered names").
- */
-const SELF_UNSELECT_TOOL_NAMES = new Set(["manage-context", "manage_context_select"]);
-
-/**
- * True if `unit`'s anchor assistant message has exactly one tool call and
- * its id is `toolCallId`. Hiding a unit hides every call bundled into it, so
- * this deliberately refuses to match when the matching call shares its turn
- * with any other tool call (same collateral-damage guard as
- * unitHasMatchingRead below) — callers that auto-hide on a match would
- * otherwise also hide unrelated calls' results just because they happened
- * to land in the same assistant turn.
- */
-export function unitHasMatchingToolCallId(unit: TurnUnit, toolCallId: string): boolean {
-	if (unit.kind !== "assistant_tool") return false;
-	if (unit.anchorEntry.type !== "message" || unit.anchorEntry.message.role !== "assistant") return false;
-
-	const toolCalls = unit.anchorEntry.message.content.filter((block) => block.type === "toolCall");
-	if (toolCalls.length !== 1) return false;
-
-	return toolCalls[0].id === toolCallId;
-}
-
-/**
- * True if `unit` is an assistant turn whose *only* tool call is a read() on
- * `resolvedPath`. Units that bundle other tool calls alongside the read are
- * left alone — unselecting the unit would hide those other calls too, since
- * a mark applies to the whole turn unit, not to one call within it.
- */
-export function unitHasMatchingRead(unit: TurnUnit, resolvedPath: string, currentToolCallId: string): boolean {
-	if (unit.kind !== "assistant_tool") return false;
-	if (unit.anchorEntry.type !== "message" || unit.anchorEntry.message.role !== "assistant") return false;
-
-	const toolCalls = unit.anchorEntry.message.content.filter((block) => block.type === "toolCall");
-	if (toolCalls.length !== 1) return false;
-
-	const [toolCall] = toolCalls;
-	// Pro-forma: the current call's own unit shouldn't exist in
-	// buildContextEntries() yet at this point in the tool_result event, but
-	// never unselect the very call that just produced this result if it does.
-	if (toolCall.id === currentToolCallId) return false;
-	if (toolCall.name !== "read") return false;
-	const path = toolCall.arguments.path;
-	return typeof path === "string" && resolve(path) === resolvedPath;
-}
+// Re-exported for the tests in tests/index.test.ts.
+export { unitHasMatchingRead, unitHasMatchingToolCallId } from "./src/hooks.ts";
 
 export default function (pi: ExtensionAPI): void {
 	let cachedModels: Model<Api>[] = [];
@@ -115,202 +57,9 @@ export default function (pi: ExtensionAPI): void {
 		cachedModels = ctx.modelRegistry.getAvailable();
 	});
 
-	pi.on("context", (_event: ContextEvent, ctx) => {
-		const state = loadState(ctx);
-		if (!hasMarks(state)) return; // nothing to change — skip all grouping work
-		const entries = ctx.sessionManager.buildContextEntries();
-		// Cheap structural groups only: the filter needs entryIds/kind, not
-		// the enriched metadata the picker and tools use.
-		const groups = buildTurnUnitGroups(entries);
-		return { messages: buildFilteredMessages(entries, groups, state) };
-	});
-
-	pi.on("tool_result", (event: ToolResultEvent, ctx) => {
-		if (!isReadToolResult(event)) return;
-		if (event.isError) return;
-
-		const state = loadState(ctx);
-		if (!state.readHookEnabled) return;
-		if (!hasMarks(state)) return; // nothing marked — no read can match anything
-
-		const path = event.input.path;
-		if (typeof path !== "string") return;
-		const resolvedPath = resolve(path);
-
-		const units = buildTurnUnits(ctx.sessionManager.buildContextEntries());
-		let changed = false;
-		for (const unit of units) {
-			if (!unitHasMatchingRead(unit, resolvedPath, event.toolCallId)) continue;
-
-			// Deletions are permanent by design (see the picker docs above) —
-			// never resurrect one into the lesser "unselected" state.
-			const mark = state.marks[unit.groupId]?.mark;
-			if (mark === "deleted" || mark === "unselected") continue;
-
-			state.marks[unit.groupId] = { mark: "unselected" };
-			changed = true;
-		}
-
-		if (changed) {
-			pruneMarks(state, new Set(units.map((u) => u.groupId)));
-			saveState(pi, state);
-		}
-	});
-
-	pi.on("tool_result", (event: ToolResultEvent, ctx) => {
-		if (!SELF_UNSELECT_TOOL_NAMES.has(event.toolName)) return;
-		if (event.isError) return;
-
-		const units = buildTurnUnits(ctx.sessionManager.buildContextEntries());
-		const unit = units.find((u) => unitHasMatchingToolCallId(u, event.toolCallId));
-		if (!unit) return;
-
-		const state = loadState(ctx);
-		let changed = false;
-
-		// Only the most recently completed manage-context call stays
-		// auto-hidden. Without this, a session that calls the tool several
-		// times (e.g. one prompt triggering multiple unselect calls) would
-		// have every one of them vanish from context — restore any earlier
-		// call this same hook had hidden, unless the user has since taken it
-		// over with their own mark (deletion, or a compression).
-		for (const other of units) {
-			if (other.groupId === unit.groupId) continue;
-			if (other.kind !== "assistant_tool") continue;
-			if (!other.metadata.toolCalls?.some((tc) => SELF_UNSELECT_TOOL_NAMES.has(tc.name))) continue;
-			if (state.marks[other.groupId]?.mark === "unselected") {
-				delete state.marks[other.groupId];
-				changed = true;
-			}
-		}
-
-		// Deletions are permanent by design (see the picker docs above) — never
-		// resurrect one into the lesser "unselected" state.
-		const mark = state.marks[unit.groupId]?.mark;
-		if (mark !== "deleted") {
-			state.marks[unit.groupId] = { mark: "unselected" };
-			changed = true;
-		}
-
-		if (changed) {
-			pruneMarks(state, new Set(units.map((u) => u.groupId)));
-			saveState(pi, state);
-		}
-	});
-
+	registerHooks(pi);
 	registerManageContextSelectTool(pi);
 	registerManageContextTool(pi);
 	registerViewContextTool(pi);
-
-	pi.registerCommand("manage_context", {
-		description: "Review, select, compress, or delete messages from the model's context",
-		getArgumentCompletions(prefix: string): AutocompleteItem[] | null {
-			if (cachedModels.length === 0) return null;
-			const items = cachedModels.map((m) => ({ value: `${m.provider}/${m.id}`, label: `${m.provider}/${m.id}` }));
-			const filtered = items.filter((i) => i.value.startsWith(prefix));
-			return filtered.length > 0 ? filtered : null;
-		},
-		handler: async (args: string, ctx: ExtensionCommandContext) => {
-			if (!ctx.hasUI) {
-				ctx.ui.notify("manage_context requires an interactive terminal", "warning");
-				return;
-			}
-
-			const state = loadState(ctx);
-			const trimmed = args.trim();
-
-			if (trimmed === "model") {
-				const current = state.compressionModel
-					? `${state.compressionModel.provider}/${state.compressionModel.id}`
-					: ctx.model
-						? `${ctx.model.provider}/${ctx.model.id} (default: main chat model)`
-						: "(none configured, no main chat model to fall back to)";
-				ctx.ui.notify(`Compression model: ${current}`, "info");
-				return;
-			}
-
-			if (trimmed) {
-				const slash = trimmed.indexOf("/");
-				const provider = slash === -1 ? "" : trimmed.slice(0, slash);
-				const modelId = slash === -1 ? "" : trimmed.slice(slash + 1);
-				const model = provider && modelId ? ctx.modelRegistry.find(provider, modelId) : undefined;
-				if (!model) {
-					ctx.ui.notify(`Unknown model "${trimmed}". Use provider/modelId, e.g. anthropic/claude-haiku-4-5.`, "error");
-					return;
-				}
-				state.compressionModel = { provider: model.provider, id: model.id };
-				saveState(pi, state);
-				ctx.ui.notify(`Compression model set to ${trimmed}`, "info");
-			}
-
-			const entries = ctx.sessionManager.buildContextEntries();
-			// Confirmed deletions are gone for good from the extension's point of
-			// view: never shown again, never sent to the model. (The underlying
-			// session file is append-only and still holds the raw entries — pi
-			// gives extensions no API to strike bytes from it — but nothing in
-			// this extension will ever surface them again.)
-			const units = buildTurnUnits(entries).filter((u) => state.marks[u.groupId]?.mark !== "deleted");
-			if (units.length === 0) {
-				ctx.ui.notify("No messages in context yet.", "info");
-				return;
-			}
-
-			await ctx.ui.custom<void>(
-				(tui, theme, _kb: KeybindingsManager, done) => new ManageContextView(tui, theme, units, state, ctx, pi, done),
-				// pi-tui defaults an overlay's width to min(80, availWidth) when no
-				// width is given, which clips this picker to 80 columns on wide
-				// terminals. Claim most of the terminal instead.
-				{ overlay: true, overlayOptions: { width: "95%", minWidth: 60 } },
-			);
-		},
-	});
-
-	pi.registerCommand("export_context", {
-		description: "Export the current context as a markdown file to the working directory",
-		handler: async (args: string, ctx: ExtensionCommandContext) => {
-			const trimmed = args.trim();
-			if (trimmed.includes("/") || trimmed.includes("\\")) {
-				ctx.ui.notify("export_context: filename must be a plain name in the current directory", "error");
-				return;
-			}
-			const filename = trimmed || `context-export-${new Date().toISOString().replace(/[:.]/g, "-")}.md`;
-			const targetPath = resolve(ctx.cwd, filename);
-
-			const state = loadState(ctx);
-			const entries = ctx.sessionManager.buildContextEntries();
-			// Deleted units are gone from the model's context by design — the
-			// export mirrors what the model actually sees, so they stay excluded.
-			const units = buildTurnUnits(entries).filter((u) => state.marks[u.groupId]?.mark !== "deleted");
-			if (units.length === 0) {
-				ctx.ui.notify("No messages in context yet.", "info");
-				return;
-			}
-
-			// Summaries are already capped per unit (preserveLineBreaks in
-			// turn-units.ts), so the export is a compact, summarized view —
-			// not a dump of the full conversation.
-			const markdown = exportUnitsToMarkdown(units, {
-				title: "Context Export",
-				includeSummary: true,
-			});
-
-			try {
-				await writeFile(targetPath, markdown, "utf-8");
-			} catch (error) {
-				ctx.ui.notify(`export_context: failed to write ${targetPath}: ${error instanceof Error ? error.message : String(error)}`, "error");
-				return;
-			}
-			ctx.ui.notify(`Exported ${units.length} entries to ${targetPath}`, "info");
-		},
-	});
-
-	pi.registerCommand("toggle-read-hook", {
-		description: "Toggle the read tool's post-execution hook on/off (default: off)",
-		handler: async (_args: string, ctx: ExtensionCommandContext) => {
-			const state = loadState(ctx);
-			state.readHookEnabled = !state.readHookEnabled;
-			saveState(pi, state);
-			ctx.ui.notify(`Read hook ${state.readHookEnabled ? "enabled" : "disabled"}`, "info");
-		},
-	});
+	registerCommands(pi, () => cachedModels);
 }

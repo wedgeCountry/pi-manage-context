@@ -1,198 +1,36 @@
 /**
- * TUI component for the /manage_context picker: a scrollable list of turn
- * units with per-row marks, an inline content preview, and a progress view
- * while queued compressions run.
+ * TUI component for the /manage_context picker (the "V" in MVVM): renders
+ * the PickerViewModel's state and forwards keypresses to it. All state,
+ * mark logic, and compression orchestration live in picker/picker-view-model.ts;
+ * this file only knows how to turn view-model state into themed lines.
  */
 
-import { matchesKey, sliceByColumn, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { sliceByColumn, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { Component, TUI } from "@earendil-works/pi-tui";
-import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
+import type { Theme } from "@earendil-works/pi-coding-agent";
 
-import { compressUnit, resolveCompressionModel } from "./compression.ts";
-import { CompressionQueue, defaultResolveMark, type CompressionEvent } from "./compression-queue.ts";
-import { saveState } from "./state.ts";
-import type { Mark, ManageContextState } from "./state.ts";
-import { MarksController, type MarkIntent } from "./marks-controller.ts";
+import type { Mark } from "./state.ts";
 import { oneLine } from "./turn-units.ts";
 import type { TurnUnit, TurnUnitMetadata } from "./turn-units.ts";
-
-interface LogLine {
-	text: string;
-	kind: "ok" | "error" | "info";
-}
+import type { PickerViewModel } from "./picker/picker-view-model.ts";
 
 /** One entry from `TurnUnitMetadata.toolCalls` — kept local since it's only used for display formatting. */
 type ToolCallInfo = NonNullable<TurnUnitMetadata["toolCalls"]>[number];
 
-/**
- * Every numeric layout/sizing knob the view uses, pulled out of the render
- * methods so callers can retune the picker (terminal real estate, preview
- * verbosity, truncation lengths, …) without editing this file. Construct
- * with `{ ...defaultManageContextViewConfig, ...overrides }` — see
- * `ManageContextView`'s constructor, which does exactly that when no full
- * config is supplied.
- */
-export interface ManageContextViewConfig {
-	/** Floor on visible list rows, even in a very short terminal. */
-	minListRows: number;
-	/** Terminal rows reserved for chrome when computing the constructor's fallback row budget (before the first render). */
-	initialHeightReserve: number;
-	/** Floor on how many rows the list keeps once the preview pane is open and splitting the remainder. */
-	minListBudgetWithPreview: number;
-	/** Fraction of the remaining rows given to the list (vs. the preview pane) once the preview is open. */
-	listPreviewSplitRatio: number;
-	/** Terminal rows reserved for the preview box's own border/hint chrome. */
-	previewChromeRows: number;
-	/** Floor on the preview box's content width. */
-	minPreviewContentWidth: number;
-	/** Columns reserved for the preview box's border/scrollbar chrome, subtracted from box width to get content width. */
-	previewBoxChromeCols: number;
-	/** Floor on the preview title's available width. */
-	minPreviewTitleWidth: number;
-	/** Columns reserved when truncating the preview title so it never crowds out the border. */
-	previewTitleReserveCols: number;
-	/** Columns scrolled per horizontal-scroll keypress in the preview pane. */
-	previewHScrollStep: number;
-	/** Max content lines shown before "… N more lines" in the compact preview. */
-	compactContentLineLimit: number;
-	/** Max content lines shown before "… N more lines" in the detailed/compressed preview. */
-	detailedContentLineLimit: number;
-	/** Max characters per rendered content line before truncation. */
-	contentLineMaxWidth: number;
-	/** Max characters for a summarized tool-call argument string. */
-	toolArgsMaxWidth: number;
-	/** Max characters for a tool-call result summary line (detailed preview). */
-	toolResultMaxWidth: number;
-	/** Width of the "───" section rules drawn inside the preview pane. */
-	sectionRuleWidth: number;
-	/** Floor on the processing view's progress bar width. */
-	progressBarMinWidth: number;
-	/** Ceiling on the processing view's progress bar width. */
-	progressBarMaxWidth: number;
-	/** Columns reserved around the progress bar, subtracted from terminal width. */
-	progressBarWidthReserve: number;
-	/** Floor on how many log rows the processing view shows. */
-	minProcessingLogRows: number;
-	/** Terminal rows reserved for chrome in the processing view, subtracted from rows to get the log row budget. */
-	processingChromeRows: number;
-	/** Max characters for a unit-preview string in the processing log. */
-	logPreviewMaxWidth: number;
-	/** Floor on a list row's usable width. */
-	minRowWidth: number;
-	/** Floor on the space reserved for a list row's label before the token count. */
-	minRowLeftBudget: number;
-	/** Columns reserved between a list row's label and its token count. */
-	rowTokenGap: number;
-	/** Floor on the preview box's total width. */
-	minPreviewBoxWidth: number;
-	/** Indent width used when pretty-printing tool-call arguments in the detailed preview. */
-	toolArgsJsonIndent: number;
-}
-
-export const defaultManageContextViewConfig: ManageContextViewConfig = {
-	minListRows: 5,
-	initialHeightReserve: 8,
-	minListBudgetWithPreview: 3,
-	listPreviewSplitRatio: 0.45,
-	previewChromeRows: 6,
-	minPreviewContentWidth: 4,
-	previewBoxChromeCols: 5,
-	minPreviewTitleWidth: 10,
-	previewTitleReserveCols: 16,
-	previewHScrollStep: 4,
-	compactContentLineLimit: 15,
-	detailedContentLineLimit: 20,
-	contentLineMaxWidth: 160,
-	toolArgsMaxWidth: 100,
-	toolResultMaxWidth: 200,
-	sectionRuleWidth: 40,
-	progressBarMinWidth: 10,
-	progressBarMaxWidth: 40,
-	progressBarWidthReserve: 10,
-	minProcessingLogRows: 3,
-	processingChromeRows: 8,
-	logPreviewMaxWidth: 120,
-	minRowWidth: 40,
-	minRowLeftBudget: 4,
-	rowTokenGap: 2,
-	minPreviewBoxWidth: 60,
-	toolArgsJsonIndent: 2,
-};
-
 export class ManageContextView implements Component {
-	private phase: "editing" | "confirm" | "processing" | "analyzing" = "editing";
-	private cursor = 0;
-	private scrollTop = 0;
-	// Recomputed on every render() from the live terminal size so the picker
-	// grows/shrinks with the window instead of a fixed row count; the
-	// constructor value is just a fallback for the (unlikely) case
-	// handleInput runs before the first render.
-	private maxVisible: number;
-	private previewGroupId: string | null = null;
-	private previewScrollTop = 0;
-	private previewScrollLeft = 0;
-	// Cached from the last render() call so handleInput (which gets no width)
-	// can clamp/step horizontal scroll against the actual box content width.
-	private previewContentWidth: number;
-	// Also recomputed each render(), same reasoning as maxVisible above.
-	private previewMaxVisible = 20;
-	private previewMode: "compact" | "detailed" = "compact"; // Toggle between compact and detailed view
-
-	// processing phase
-	private progressDone = 0;
-	private progressTotal = 0;
-	private log: LogLine[] = [];
-	private cancelled = false;
-	private abortController = new AbortController();
-
-	private readonly config: ManageContextViewConfig;
 	private readonly tui: TUI;
 	private readonly theme: Theme;
-	private readonly units: TurnUnit[];
-	private readonly state: ManageContextState;
-	private readonly ctx: ExtensionCommandContext;
-	private readonly pi: ExtensionAPI;
+	private readonly vm: PickerViewModel;
 	private readonly done: (result: void) => void;
-	private readonly marks: MarksController;
-	private queue: CompressionQueue | null = null;
 
-	constructor(
-		tui: TUI,
-		theme: Theme,
-		units: TurnUnit[],
-		state: ManageContextState,
-		ctx: ExtensionCommandContext,
-		pi: ExtensionAPI,
-		done: (result: void) => void,
-		config?: Partial<ManageContextViewConfig>,
-	) {
+	constructor(tui: TUI, theme: Theme, vm: PickerViewModel, done: (result: void) => void) {
 		this.tui = tui;
 		this.theme = theme;
-		this.units = units;
-		this.state = state;
-		this.ctx = ctx;
-		this.pi = pi;
+		this.vm = vm;
 		this.done = done;
-		this.config = { ...defaultManageContextViewConfig, ...config };
-		this.marks = new MarksController(this.state, units.map((u) => u.groupId));
-		this.previewContentWidth = this.config.sectionRuleWidth;
-		const minRows = this.config.minListRows;
-		this.maxVisible = Math.max(minRows, Math.min(units.length, Math.max(minRows, tui.terminal.rows - this.config.initialHeightReserve)));
 	}
 
 	invalidate(): void {}
-
-	private markOf(groupId: string): Mark {
-		return this.marks.rawMark(groupId);
-	}
-
-	private effectiveMark(groupId: string): Mark {
-		return this.marks.effectiveMark(groupId);
-	}
-
-	private setMark(groupId: string, intent: MarkIntent): void {
-		this.marks.apply(groupId, intent);
-	}
 
 	private glyphFor(mark: Mark): string {
 		switch (mark) {
@@ -225,10 +63,10 @@ export class ManageContextView implements Component {
 	private summarizeToolArgs(name: string, args: Record<string, unknown>): string {
 		const path = args.path ?? args.file_path;
 		if (typeof path === "string" && (name === "read" || name === "write" || name === "edit" || name === "ls")) return path;
-		if (name === "bash" && typeof args.command === "string") return oneLine(String(args.command), this.config.toolArgsMaxWidth);
+		if (name === "bash" && typeof args.command === "string") return oneLine(String(args.command), this.vm.config.toolArgsMaxWidth);
 		if (name === "grep" && typeof args.pattern === "string") return `/${args.pattern}/`;
 		try {
-			return oneLine(JSON.stringify(args), this.config.toolArgsMaxWidth);
+			return oneLine(JSON.stringify(args), this.vm.config.toolArgsMaxWidth);
 		} catch {
 			return "";
 		}
@@ -243,7 +81,7 @@ export class ManageContextView implements Component {
 	}
 
 	private labelFor(unit: TurnUnit): string {
-		const info = this.state.marks[unit.groupId];
+		const info = this.vm.state.marks[unit.groupId];
 		if (info?.compressedText) {
 			const from = info.originalTokenEstimate ?? unit.tokenEstimate;
 			const to = info.compressedTokenEstimate ?? "?";
@@ -253,16 +91,9 @@ export class ManageContextView implements Component {
 	}
 
 	render(width: number): string[] {
-		if (this.phase === "processing") return this.renderProcessing(width);
+		this.vm.updateLayout(this.tui.terminal.rows);
+		if (this.vm.phase === "processing") return this.renderProcessing(width);
 		return this.renderEditing(width);
-	}
-
-	private countDeleted(): number {
-		return this.marks.countBy("deleted");
-	}
-
-	private countCompressed(): number {
-		return this.marks.countBy("compressed");
 	}
 
 	private rule(width: number, color: Parameters<Theme["fg"]>[0] = "border"): string {
@@ -289,9 +120,9 @@ export class ManageContextView implements Component {
 
 	/** Persistent status footer: cursor position plus a live count of pending marks. */
 	private statusLine(start: number, end: number): string {
-		const nDeleted = this.countDeleted();
-		const nCompressed = this.countCompressed();
-		const parts = [this.theme.fg("muted", `${start + 1}-${end} of ${this.units.length}`)];
+		const nDeleted = this.vm.countDeleted();
+		const nCompressed = this.vm.countCompressed();
+		const parts = [this.theme.fg("muted", `${start + 1}-${end} of ${this.vm.units.length}`)];
 		if (nDeleted > 0) parts.push(this.theme.fg("error", `${nDeleted} to delete`));
 		if (nCompressed > 0) parts.push(this.theme.fg("warning", `${nCompressed} to compress`));
 		return `  ${parts.join(this.theme.fg("dim", "   ·   "))}`;
@@ -303,9 +134,9 @@ export class ManageContextView implements Component {
 
 		lines.push(rule);
 		lines.push(`  ${this.theme.bold(this.theme.fg("accent", "Manage context"))}`);
-		if (this.phase === "confirm") {
-			const nDeleted = this.countDeleted();
-			const nCompressed = this.countCompressed();
+		if (this.vm.phase === "confirm") {
+			const nDeleted = this.vm.countDeleted();
+			const nCompressed = this.vm.countCompressed();
 			if (nDeleted > 0) {
 				lines.push(
 					this.theme.fg(
@@ -329,31 +160,17 @@ export class ManageContextView implements Component {
 		}
 		lines.push(rule);
 
-		// Fit the list to the live terminal height: the header chrome above is
-		// already known at this point (lines.length so far, plus the footer
-		// status line pushed below), so whatever rows remain go to the list.
-		// When the preview pane is open too, split the remainder between them
-		// instead of letting the list claim it all.
-		const availableRows = Math.max(1, this.tui.terminal.rows);
-		const chromeSoFar = lines.length + 1; // + statusLine pushed below
-		const remaining = Math.max(0, availableRows - chromeSoFar - 1);
-		const listBudget = this.previewGroupId
-			? Math.max(this.config.minListBudgetWithPreview, Math.floor(remaining * this.config.listPreviewSplitRatio))
-			: remaining;
-		this.maxVisible = Math.max(
-			Math.min(this.config.minListRows, this.units.length),
-			Math.min(this.units.length, listBudget),
-		);
-
-		const start = this.scrollTop;
-		const end = Math.min(this.units.length, start + this.maxVisible);
-		const showScrollbar = this.units.length > this.maxVisible;
-		const thumb = showScrollbar ? this.scrollbarThumb(this.maxVisible, this.units.length, this.scrollTop) : null;
+		// The view-model already computed the list budget for this terminal
+		// height in updateLayout() (called at the top of render()).
+		const start = this.vm.scrollTop;
+		const end = Math.min(this.vm.units.length, start + this.vm.maxVisible);
+		const showScrollbar = this.vm.units.length > this.vm.maxVisible;
+		const thumb = showScrollbar ? this.scrollbarThumb(this.vm.maxVisible, this.vm.units.length, this.vm.scrollTop) : null;
 
 		for (let i = start; i < end; i++) {
-			const unit = this.units[i];
-			const isCursor = i === this.cursor;
-			const glyph = this.glyphFor(this.effectiveMark(unit.groupId));
+			const unit = this.vm.units[i];
+			const isCursor = i === this.vm.cursor;
+			const glyph = this.glyphFor(this.vm.effectiveMark(unit.groupId));
 			const cursorMark = isCursor ? this.theme.fg("accent", "› ") : "  ";
 			const label = this.labelFor(unit);
 			const text = isCursor ? this.theme.bold(label) : label;
@@ -361,8 +178,8 @@ export class ManageContextView implements Component {
 			const tokensRendered = this.theme.fg("dim", tokensText);
 
 			const scrollCol = showScrollbar ? 2 : 0;
-			const rowWidth = Math.max(this.config.minRowWidth, width) - scrollCol;
-			const leftBudget = Math.max(this.config.minRowLeftBudget, rowWidth - visibleWidth(tokensText) - this.config.rowTokenGap);
+			const rowWidth = Math.max(this.vm.config.minRowWidth, width) - scrollCol;
+			const leftBudget = Math.max(this.vm.config.minRowLeftBudget, rowWidth - visibleWidth(tokensText) - this.vm.config.rowTokenGap);
 			const leftPart = truncateToWidth(`${cursorMark}${glyph} ${text}`, leftBudget, "…");
 			const gap = Math.max(1, leftBudget - visibleWidth(leftPart) + 1);
 
@@ -379,8 +196,8 @@ export class ManageContextView implements Component {
 		}
 		lines.push(this.statusLine(start, end));
 
-		if (this.previewGroupId) {
-			const unit = this.units.find((u) => u.groupId === this.previewGroupId);
+		if (this.vm.previewGroupId) {
+			const unit = this.vm.units.find((u) => u.groupId === this.vm.previewGroupId);
 			if (unit) {
 				lines.push("");
 
@@ -388,37 +205,27 @@ export class ManageContextView implements Component {
 				// text flowing at the outer TUI width) so the scrollbar has a
 				// track to sit in that clearly belongs to the preview, not the
 				// picker around it.
-				const boxWidth = Math.max(this.config.minPreviewBoxWidth, width);
-				// "│ " + content + " " + scrollbar col + "│"
-				const contentWidth = Math.max(this.config.minPreviewContentWidth, boxWidth - this.config.previewBoxChromeCols);
-				this.previewContentWidth = contentWidth;
+				const boxWidth = Math.max(this.vm.config.minPreviewBoxWidth, width);
+				this.vm.updatePreviewLayout(this.tui.terminal.rows, lines.length, boxWidth);
+				const contentWidth = this.vm.previewContentWidth;
 
-				// Same idea as the list above: whatever terminal rows remain
-				// after the header, list, footer, and this box's own
-				// border/hint chrome go to the preview's visible line count.
-				// blank + top border + bottom border + line-info hint + close hint + slack
-				const previewChrome = this.config.previewChromeRows;
-				this.previewMaxVisible = Math.max(
-					this.config.minListBudgetWithPreview,
-					this.tui.terminal.rows - lines.length - previewChrome,
-				);
-
-				const fullLines = this.previewLines();
-				const viewportHeight = Math.max(1, Math.min(this.previewMaxVisible, fullLines.length));
+				const fullLines = this.previewLines(unit);
+				this.vm.setPreviewGeometry(fullLines.length, fullLines.reduce((max, l) => Math.max(max, visibleWidth(l)), 0));
+				const viewportHeight = Math.max(1, Math.min(this.vm.previewMaxVisible, fullLines.length));
 				const maxScrollTop = Math.max(0, fullLines.length - viewportHeight);
-				const scrollTop = Math.min(this.previewScrollTop, maxScrollTop);
+				const scrollTop = Math.min(this.vm.previewScrollTop, maxScrollTop);
 				const visibleLines = fullLines.slice(scrollTop, scrollTop + viewportHeight);
 				const showVScrollbar = fullLines.length > viewportHeight;
 				const vThumb = this.scrollbarThumb(viewportHeight, fullLines.length, scrollTop);
 
 				const maxLineWidth = fullLines.reduce((max, l) => Math.max(max, visibleWidth(l)), 0);
 				const maxScrollLeft = Math.max(0, maxLineWidth - contentWidth);
-				const scrollLeft = Math.min(this.previewScrollLeft, maxScrollLeft);
+				const scrollLeft = Math.min(this.vm.previewScrollLeft, maxScrollLeft);
 				const showHScrollbar = maxLineWidth > contentWidth;
 				const hThumb = this.scrollbarThumb(contentWidth, maxLineWidth, scrollLeft);
 
 				const border = this.theme.fg("borderAccent", "│");
-				const titleText = ` preview — ${oneLine(unit.metadata.heading, Math.max(this.config.minPreviewTitleWidth, boxWidth - this.config.previewTitleReserveCols))} `;
+				const titleText = ` preview — ${oneLine(unit.metadata.heading, Math.max(this.vm.config.minPreviewTitleWidth, boxWidth - this.vm.config.previewTitleReserveCols))} `;
 				const titleRule = "─".repeat(Math.max(0, boxWidth - 2 - visibleWidth(titleText)));
 				lines.push(this.theme.fg("borderAccent", `┌${titleText}${titleRule}┐`));
 				for (let i = 0; i < viewportHeight; i++) {
@@ -453,16 +260,14 @@ export class ManageContextView implements Component {
 		return lines;
 	}
 
-	private previewLines(): string[] {
-		const unit = this.units.find((u) => u.groupId === this.previewGroupId);
-		if (!unit) return [];
-		const compressedText = this.state.marks[unit.groupId]?.compressedText;
+	private previewLines(unit: TurnUnit): string[] {
+		const compressedText = this.vm.state.marks[unit.groupId]?.compressedText;
 
 		if (compressedText) {
 			return this.renderCompressedPreview(unit, compressedText);
 		}
 
-		if (this.previewMode === "detailed") {
+		if (this.vm.previewMode === "detailed") {
 			return this.renderDetailedPreview(unit);
 		}
 
@@ -474,9 +279,7 @@ export class ManageContextView implements Component {
 		return this.theme.bold(this.theme.fg("text", label));
 	}
 
-	/**
-	 * Render enhanced preview with metadata for the original entry.
-	 */
+	/** Render enhanced preview with metadata for the original entry. */
 	private renderEnhancedPreview(unit: TurnUnit): string[] {
 		const lines: string[] = [];
 
@@ -487,10 +290,9 @@ export class ManageContextView implements Component {
 				`${unit.timestamp}  ·  ${unit.tokenEstimate} tok`,
 			),
 		);
-		lines.push(this.theme.fg("border", "─".repeat(this.config.sectionRuleWidth)));
+		lines.push(this.theme.fg("border", "─".repeat(this.vm.config.sectionRuleWidth)));
 		lines.push("");
 
-		// Tool calls section (if applicable)
 		if (unit.metadata.toolCalls && unit.metadata.toolCalls.length > 0) {
 			lines.push(this.sectionHeading("Tool calls"));
 			for (const toolCall of unit.metadata.toolCalls) {
@@ -499,25 +301,21 @@ export class ManageContextView implements Component {
 			lines.push("");
 		}
 
-		// Content section
 		lines.push(this.sectionHeading("Content"));
 		const contentLines = unit.metadata.summary.split("\n");
-		const contentLimit = this.config.compactContentLineLimit;
+		const contentLimit = this.vm.config.compactContentLineLimit;
 		contentLines.slice(0, contentLimit).forEach((line) => {
-			lines.push(this.theme.fg("text", oneLine(line, this.config.contentLineMaxWidth)));
+			lines.push(this.theme.fg("text", oneLine(line, this.vm.config.contentLineMaxWidth)));
 		});
 		if (contentLines.length > contentLimit) {
 			lines.push(this.theme.fg("dim", `… ${contentLines.length - contentLimit} more lines`));
 		}
 		lines.push("");
 
-
 		return lines;
 	}
 
-	/**
-	 * Render detailed preview for the original entry (LLM-optimized format).
-	 */
+	/** Render detailed preview for the original entry (LLM-optimized format). */
 	private renderDetailedPreview(unit: TurnUnit): string[] {
 		const lines: string[] = [];
 
@@ -528,62 +326,56 @@ export class ManageContextView implements Component {
 				`${unit.metadata.type}  ·  ${unit.timestamp}  ·  ${unit.tokenEstimate} tok`,
 			),
 		);
-		lines.push(this.theme.fg("border", "─".repeat(this.config.sectionRuleWidth)));
+		lines.push(this.theme.fg("border", "─".repeat(this.vm.config.sectionRuleWidth)));
 		lines.push("");
 
-		// Tool calls (if applicable)
 		if (unit.metadata.toolCalls && unit.metadata.toolCalls.length > 0) {
 			lines.push(this.sectionHeading("Tool calls"));
 			unit.metadata.toolCalls.forEach((toolCall, idx) => {
 				lines.push(`  ${idx + 1}. ${this.formatToolCallLine(toolCall)}`);
-				const argLines = JSON.stringify(toolCall.arguments, null, this.config.toolArgsJsonIndent).split("\n");
+				const argLines = JSON.stringify(toolCall.arguments, null, this.vm.config.toolArgsJsonIndent).split("\n");
 				argLines.forEach((line) => lines.push(this.theme.fg("dim", `     ${line}`)));
 				if (toolCall.result) {
 					lines.push(
-						this.theme.fg("dim", `     → ${oneLine(toolCall.description || toolCall.result, this.config.toolResultMaxWidth)}`),
+						this.theme.fg("dim", `     → ${oneLine(toolCall.description || toolCall.result, this.vm.config.toolResultMaxWidth)}`),
 					);
 				}
 			});
 			lines.push("");
 		}
 
-		// Content
 		lines.push(this.sectionHeading("Content"));
 		const contentLines = unit.metadata.summary.split("\n");
-		const contentLimit = this.config.detailedContentLineLimit;
+		const contentLimit = this.vm.config.detailedContentLineLimit;
 		contentLines.slice(0, contentLimit).forEach((line) => {
-			lines.push(this.theme.fg("text", oneLine(line, this.config.contentLineMaxWidth)));
+			lines.push(this.theme.fg("text", oneLine(line, this.vm.config.contentLineMaxWidth)));
 		});
 		if (contentLines.length > contentLimit) {
 			lines.push(this.theme.fg("dim", `… ${contentLines.length - contentLimit} more lines`));
 		}
 		lines.push("");
 
-
 		lines.push(this.theme.fg("dim", "press m to switch to compact view"));
 
 		return lines;
 	}
 
-	/**
-	 * Render preview for a compressed entry.
-	 */
+	/** Render preview for a compressed entry. */
 	private renderCompressedPreview(unit: TurnUnit, compressedText: string): string[] {
 		const lines: string[] = [];
-		const info = this.state.marks[unit.groupId];
+		const info = this.vm.state.marks[unit.groupId];
 		const from = info?.originalTokenEstimate ?? unit.tokenEstimate;
 		const to = info?.compressedTokenEstimate ?? "?";
 
 		lines.push(`${this.glyphFor("compressed")}  ${this.theme.bold(unit.metadata.heading)}`);
 		lines.push(this.theme.fg("dim", `compressed  ·  ${from} → ${to} tok`));
-		lines.push(this.theme.fg("warning", "─".repeat(this.config.sectionRuleWidth)));
+		lines.push(this.theme.fg("warning", "─".repeat(this.vm.config.sectionRuleWidth)));
 		lines.push("");
 
-		// Show compressed content
 		const contentLines = compressedText.split("\n");
-		const contentLimit = this.config.detailedContentLineLimit;
+		const contentLimit = this.vm.config.detailedContentLineLimit;
 		contentLines.slice(0, contentLimit).forEach((line) => {
-			lines.push(this.theme.fg("text", oneLine(line, this.config.contentLineMaxWidth)));
+			lines.push(this.theme.fg("text", oneLine(line, this.vm.config.contentLineMaxWidth)));
 		});
 		if (contentLines.length > contentLimit) {
 			lines.push(this.theme.fg("dim", `… ${contentLines.length - contentLimit} more lines`));
@@ -608,24 +400,24 @@ export class ManageContextView implements Component {
 		lines.push(`  ${this.theme.bold(this.theme.fg("accent", "Applying changes"))}`);
 		lines.push("");
 		const barWidth = Math.max(
-			this.config.progressBarMinWidth,
-			Math.min(this.config.progressBarMaxWidth, width - this.config.progressBarWidthReserve),
+			this.vm.config.progressBarMinWidth,
+			Math.min(this.vm.config.progressBarMaxWidth, width - this.vm.config.progressBarWidthReserve),
 		);
 		const filled =
-			this.progressTotal === 0 ? barWidth : Math.round((this.progressDone / this.progressTotal) * barWidth);
+			this.vm.progressTotal === 0 ? barWidth : Math.round((this.vm.progressDone / this.vm.progressTotal) * barWidth);
 		const bar =
 			this.theme.fg("accent", "█".repeat(filled)) + this.theme.fg("dim", "░".repeat(Math.max(0, barWidth - filled)));
-		lines.push(`  [${bar}] ${this.theme.fg("muted", `${this.progressDone}/${this.progressTotal}`)}`);
+		lines.push(`  [${bar}] ${this.theme.fg("muted", `${this.vm.progressDone}/${this.vm.progressTotal}`)}`);
 		lines.push("");
-		const logRows = Math.max(this.config.minProcessingLogRows, this.tui.terminal.rows - this.config.processingChromeRows);
-		for (const entry of this.log.slice(-logRows)) {
+		const logRows = Math.max(this.vm.config.minProcessingLogRows, this.tui.terminal.rows - this.vm.config.processingChromeRows);
+		for (const entry of this.vm.log.slice(-logRows)) {
 			const color = entry.kind === "ok" ? "success" : entry.kind === "error" ? "error" : "muted";
 			lines.push(`  ${this.theme.fg(color, entry.text)}`);
 		}
-		if (this.progressDone >= this.progressTotal) {
+		if (this.vm.progressDone >= this.vm.progressTotal) {
 			lines.push("");
 			lines.push(this.theme.fg("dim", "  done — closing…"));
-		} else if (this.cancelled) {
+		} else if (this.vm.cancelled) {
 			lines.push("");
 			lines.push(this.theme.fg("dim", "  cancelling…"));
 		} else {
@@ -636,144 +428,11 @@ export class ManageContextView implements Component {
 	}
 
 	handleInput(data: string): void {
-		if (this.phase === "processing") {
-			if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) {
-				this.cancelled = true;
-				this.abortController.abort();
-				this.tui.requestRender();
-			}
-			return;
-		}
-
-		if (this.previewGroupId) {
-			if (
-				matchesKey(data, "enter") ||
-				matchesKey(data, "escape") ||
-				matchesKey(data, "space") ||
-				matchesKey(data, "ctrl+c")
-			) {
-				this.previewGroupId = null;
-			} else if (matchesKey(data, "m")) {
-				// Toggle preview mode (compact/detailed)
-				this.previewMode = this.previewMode === "compact" ? "detailed" : "compact";
-			} else {
-				const fullLines = this.previewLines();
-				const viewportHeight = Math.max(1, Math.min(this.previewMaxVisible, fullLines.length));
-				const maxScrollTop = Math.max(0, fullLines.length - viewportHeight);
-				const maxLineWidth = fullLines.reduce((max, l) => Math.max(max, visibleWidth(l)), 0);
-				const maxScrollLeft = Math.max(0, maxLineWidth - this.previewContentWidth);
-				if (matchesKey(data, "up")) this.previewScrollTop = Math.max(0, this.previewScrollTop - 1);
-				else if (matchesKey(data, "down")) this.previewScrollTop = Math.min(maxScrollTop, this.previewScrollTop + 1);
-				else if (matchesKey(data, "pageUp"))
-					this.previewScrollTop = Math.max(0, this.previewScrollTop - viewportHeight);
-				else if (matchesKey(data, "pageDown"))
-					this.previewScrollTop = Math.min(maxScrollTop, this.previewScrollTop + viewportHeight);
-				else if (matchesKey(data, "left")) {
-					// Close preview on left arrow
-					this.previewGroupId = null;
-				} else if (matchesKey(data, "right"))
-					this.previewScrollLeft = Math.min(maxScrollLeft, this.previewScrollLeft + this.config.previewHScrollStep);
-				else if (matchesKey(data, "home")) this.previewScrollLeft = 0;
-				else if (matchesKey(data, "end")) this.previewScrollLeft = maxScrollLeft;
-			}
-			this.tui.requestRender();
-			return;
-		}
-		if (matchesKey(data, "ctrl+c") || matchesKey(data, "escape")) {
+		const result = this.vm.handleInput(data);
+		if (result === "close") {
 			this.done();
 			return;
 		}
-		if (this.phase === "confirm") {
-			if (matchesKey(data, "y") || matchesKey(data, "enter")) {
-				this.startProcessing();
-			} else if (matchesKey(data, "n")) {
-				this.phase = "editing";
-				this.tui.requestRender();
-			}
-			return;
-		}
-		if (matchesKey(data, "enter")) {
-			if (this.countDeleted() > 0 || this.countCompressed() > 0) {
-				this.phase = "confirm";
-				this.tui.requestRender();
-			} else {
-				this.startProcessing();
-			}
-			return;
-		}
-		if (matchesKey(data, "up")) this.moveCursor(-1);
-		else if (matchesKey(data, "down")) this.moveCursor(1);
-		else if (matchesKey(data, "pageUp")) this.moveCursor(-this.maxVisible);
-		else if (matchesKey(data, "pageDown")) this.moveCursor(this.maxVisible);
-		else if (matchesKey(data, "space")) this.setMark(this.currentUnit().groupId, "toggle-unselected");
-		else if (matchesKey(data, "c")) this.setMark(this.currentUnit().groupId, "toggle-compressed");
-		else if (matchesKey(data, "d")) this.setMark(this.currentUnit().groupId, "toggle-deleted");
-		else if (matchesKey(data, "right")) {
-			this.previewGroupId = this.currentUnit().groupId;
-			this.previewScrollTop = 0;
-			this.previewScrollLeft = 0;
-		}
-
 		this.tui.requestRender();
-	}
-
-	private currentUnit(): TurnUnit {
-		return this.units[this.cursor];
-	}
-
-	private moveCursor(delta: number): void {
-		this.cursor = Math.max(0, Math.min(this.units.length - 1, this.cursor + delta));
-		if (this.cursor < this.scrollTop) this.scrollTop = this.cursor;
-		if (this.cursor >= this.scrollTop + this.maxVisible) this.scrollTop = this.cursor - this.maxVisible + 1;
-	}
-
-	private startProcessing(): void {
-		this.phase = "processing";
-		const toCompress = this.units.filter((u) => this.markOf(u.groupId) === "compressed");
-		this.progressTotal = toCompress.length;
-		this.progressDone = 0;
-		this.tui.requestRender();
-
-		// Persist selection/deletion/unselection marks immediately — those
-		// need no async work. Compression results are appended once done.
-		saveState(this.pi, this.state);
-
-		void this.runCompressions(toCompress);
-	}
-
-	/** Compression worker wiring: queue events drive the log/progress; marks resolve through the queue. */
-	private buildQueue(): CompressionQueue {
-		return new CompressionQueue(
-			async (unit) => {
-				const model = await resolveCompressionModel(this.ctx, this.state);
-				if (!model) throw new Error("no model available");
-				return compressUnit(unit, model, this.ctx, this.abortController.signal);
-			},
-			(event, progress) => this.onCompressionEvent(event, progress),
-			defaultResolveMark(this.state),
-		);
-	}
-
-	private onCompressionEvent(event: CompressionEvent, progress: { done: number; total: number }): void {
-		const preview = oneLine(event.unit.preview, this.config.logPreviewMaxWidth);
-		if (event.kind === "done") {
-			this.log.push({
-				text: `✓ ${preview} — ${event.unit.tokenEstimate} → ~${event.compressedTokenEstimate} tok`,
-				kind: "ok",
-			});
-		} else if (event.kind === "cancelled") {
-			this.log.push({ text: `– ${preview} — cancelled`, kind: "info" });
-		} else {
-			this.log.push({ text: `✕ ${preview} — ${event.message}`, kind: "error" });
-		}
-		this.progressDone = progress.done;
-		saveState(this.pi, this.state);
-		this.tui.requestRender();
-	}
-
-	private async runCompressions(units: TurnUnit[]): Promise<void> {
-		this.queue = this.buildQueue();
-		await this.queue.run(units);
-		this.done();
 	}
 }

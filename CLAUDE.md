@@ -57,6 +57,33 @@ one plain function; `src/tools/manage-context.ts` exports `buildManageContextToo
   hand-built `TurnUnit`/`ManageContextState` fixtures (see existing `*-plain.test.ts` files
   for the fixture shape).
 
+## Entry-point wiring
+
+`index.ts` is pure wiring only — it registers hooks, tools, and commands:
+
+- `src/hooks.ts` — the `"context"` filter and the two `"tool_result"` auto-unselect
+  hooks, plus the pure `unitHasMatchingRead` / `unitHasMatchingToolCallId` matchers
+  (re-exported from `index.ts` for `tests/index.test.ts`). `registerHooks(pi)` wires them.
+- `src/commands.ts` — the three slash commands (`/manage_context`, `/export_context`,
+  `/toggle-read-hook`); `registerCommands(pi, () => cachedModels)` wires them.
+
+## Picker (MVVM)
+
+The `/manage_context` picker is split into view / view-model / services:
+
+- `src/picker/picker-view-model.ts` — all picker state and behavior (phase machine,
+  cursor/scroll, mark toggles, preview navigation, compression orchestration) with no
+  TUI/theme knowledge. `handleInput(data)` returns `"render" | "close"`; the view
+  performs the TUI side effects. Tested without a TUI via `tests/picker-view-model.test.ts`.
+- `src/view.ts` — the view only: renders view-model state into themed lines and forwards
+  keypresses to the view-model. No mark logic, no async work.
+- `src/picker/picker-config.ts` — every numeric layout/sizing knob (`PickerConfig` /
+  `defaultPickerConfig`), injectable into the view-model.
+- `src/services/state-service.ts` — the view-model's only way to load/save
+  `ManageContextState` (`createStateService(pi, ctx)`).
+- `src/services/compression-service.ts` — owns the abort controller and model
+  resolution for compression (`createCompressionService(ctx, state)`).
+
 ## Other modules
 
 - `src/state.ts` — persisted extension state (marks, compression model, read-hook toggle),
@@ -73,11 +100,9 @@ one plain function; `src/tools/manage-context.ts` exports `buildManageContextToo
   effective, glyphs, labels). Every surface (picker, view_context, manage-context, filter)
   must report marks through `markStatus`/`describeMark`, not by re-deriving them.
 - `src/marks-controller.ts` — pure mark transitions for the picker (toggle intents in,
-  next marks out); testable without a TUI.
+  next marks out); used by the view-model.
 - `src/compression-queue.ts` — compression orchestration (sequential runs, progress events,
-  mark resolution policy); testable with a fake compress function.
-- `src/view.ts` — the interactive `/manage_context` picker UI (not a tool). Rendering and
-  key dispatch only; mark logic and compression work live in the modules above.
+  mark resolution policy); driven by the view-model with the compression service's compress fn.
 - `src/compression.ts`, `src/llm-export.ts`, `src/markdown-export.ts` — supporting logic used
   by the picker and by the tools' `llm-json`/summary output formats. `markdown-export.ts` backs
   the `/export_context` command in `index.ts`.
