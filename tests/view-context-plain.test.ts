@@ -24,7 +24,6 @@ function makeUnit(groupId: string, kind: TurnUnit["kind"], heading: string): Tur
 			type: kind === "user" ? "user_message" : "assistant_response",
 			timestamp: "0",
 			summary: heading,
-			importanceScore: 50,
 		},
 	};
 }

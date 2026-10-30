@@ -7,8 +7,8 @@
  * The manage-context tool's own tool call + result are auto-unselected right
  * after it runs (see the "tool_result" hook below) — otherwise every
  * subsequent turn would keep re-sending the tool call that was supposed to
- * shrink the context, defeating the point. Both registered names count (see
- * CLAUDE.md's "One implementation, multiple registered names").
+ * shrink the context, defeating the point. Both registered names count (the
+ * tool is registered under two names sharing one implementation).
  */
 
 import { resolve } from "node:path";

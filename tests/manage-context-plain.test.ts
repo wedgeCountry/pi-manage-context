@@ -23,7 +23,6 @@ function makeUnit(groupId: string, heading: string, opts: Partial<TurnUnit> = {}
 			type: "user_message",
 			timestamp: "0",
 			summary: heading,
-			importanceScore: 50,
 		},
 		...opts,
 	};
@@ -41,7 +40,6 @@ describe("unitSearchText / unitMatches", () => {
 				type: "tool_interaction",
 				timestamp: "0",
 				summary: "Executed write_file",
-				importanceScore: 60,
 				toolCalls: [{ name: "write_file", arguments: { path: "poem.txt" }, result: "Wrote poem.txt", description: "✓ Wrote poem.txt" }],
 			},
 		});
