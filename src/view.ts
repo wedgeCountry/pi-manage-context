@@ -206,7 +206,7 @@ export class ManageContextView implements Component {
 				// track to sit in that clearly belongs to the preview, not the
 				// picker around it.
 				const boxWidth = Math.max(this.vm.config.minPreviewBoxWidth, width);
-				this.vm.updatePreviewLayout(this.tui.terminal.rows, lines.length, boxWidth);
+				this.vm.updatePreviewLayout(boxWidth);
 				const contentWidth = this.vm.previewContentWidth;
 
 				const fullLines = this.previewLines(unit);
