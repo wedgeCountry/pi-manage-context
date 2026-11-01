@@ -43,7 +43,6 @@ export, or the model's context.
 |---|---|
 | `view_context` | Readable overview of the context: `format` = `summary` (default) / `detailed` / `llm-json`; `includeDeleted` (default `false`) |
 | `manage-context` | `action` = `list` / `select` / `unselect`, matched by `textMatch` (heading, message text, tool call name/args/result) and/or `groupIds` |
-| `manage_context_select` | Legacy alias of `manage-context`, same behavior |
 
 Unselected units are hidden from the model on its next turn but can be
 re-selected; they are not deleted.
