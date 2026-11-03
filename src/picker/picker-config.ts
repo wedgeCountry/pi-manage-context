@@ -11,8 +11,10 @@ export interface PickerConfig {
 	initialHeightReserve: number;
 	/** Floor on how many rows the list keeps once the preview pane is open and splitting the remainder. */
 	minListBudgetWithPreview: number;
-	/** Fraction of the remaining rows given to the list (vs. the preview pane) once the preview is open. */
-	listPreviewSplitRatio: number;
+	/** Fraction of the remaining rows given to the preview pane once it is open. */
+	previewHeightRatio: number;
+	/** Floor on the preview pane's visible rows, even in a very short terminal. */
+	minPreviewRows: number;
 	/** Terminal rows reserved for the preview box's own border/hint chrome. */
 	previewChromeRows: number;
 	/** Floor on the preview box's content width. */
@@ -65,7 +67,8 @@ export const defaultPickerConfig: PickerConfig = {
 	minListRows: 5,
 	initialHeightReserve: 8,
 	minListBudgetWithPreview: 3,
-	listPreviewSplitRatio: 0.45,
+	previewHeightRatio: 0.5,
+	minPreviewRows: 5,
 	previewChromeRows: 6,
 	minPreviewContentWidth: 4,
 	previewBoxChromeCols: 5,

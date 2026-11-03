@@ -121,25 +121,33 @@ export class PickerViewModel {
 	updateLayout(terminalRows: number): void {
 		const chrome = 7; // rule + title + help/legend-or-confirm + rule + status + slack, see renderEditing
 		const remaining = Math.max(0, terminalRows - chrome - 1);
-		const listBudget = this.previewGroupId
-			? Math.max(this.config.minListBudgetWithPreview, Math.floor(remaining * this.config.listPreviewSplitRatio))
-			: remaining;
-		this.maxVisible = Math.max(
-			Math.min(this.config.minListRows, this.units.length),
-			Math.min(this.units.length, listBudget),
-		);
+		if (this.previewGroupId) {
+			// The preview pane takes a fixed fraction of the remaining rows;
+			// the list gets whatever is left above its floor.
+			this.previewMaxVisible = Math.max(
+				this.config.minPreviewRows,
+				Math.floor(remaining * this.config.previewHeightRatio),
+			);
+			const listBudget = Math.max(this.config.minListBudgetWithPreview, remaining - this.previewMaxVisible - this.config.previewChromeRows);
+			this.maxVisible = Math.max(
+				Math.min(this.config.minListRows, this.units.length),
+				Math.min(this.units.length, listBudget),
+			);
+		} else {
+			this.maxVisible = Math.max(
+				Math.min(this.config.minListRows, this.units.length),
+				Math.min(this.units.length, remaining),
+			);
+		}
 	}
 
 	/**
-	 * Recompute the preview pane's content width / visible line count from the
-	 * outer layout. The view calls this while rendering the preview box.
+	 * Recompute the preview pane's content width from the box width. The view
+	 * calls this while rendering the preview box; the visible row count was
+	 * already set by updateLayout() via previewHeightRatio.
 	 */
-	updatePreviewLayout(terminalRows: number, linesSoFar: number, boxWidth: number): void {
+	updatePreviewLayout(boxWidth: number): void {
 		this.previewContentWidth = Math.max(this.config.minPreviewContentWidth, boxWidth - this.config.previewBoxChromeCols);
-		this.previewMaxVisible = Math.max(
-			this.config.minListBudgetWithPreview,
-			terminalRows - linesSoFar - this.config.previewChromeRows,
-		);
 	}
 
 	/** Called by the view after rendering the preview pane with its real geometry. */

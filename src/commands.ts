@@ -88,10 +88,11 @@ export function registerCommands(pi: ExtensionAPI, cachedModels: () => Model<Api
 					});
 					return new ManageContextView(tui, theme, vm, done);
 				},
-				// pi-tui defaults an overlay's width to min(80, availWidth) when no
-				// width is given, which clips this picker to 80 columns on wide
-				// terminals. Claim most of the terminal instead.
-				{ overlay: true, overlayOptions: { width: "95%", minWidth: 60 } },
+				// pi-tui defaults an overlay's width to min(80, availWidth), which
+				// clips this picker to 80 columns on wide terminals. The picker
+				// renders one line per terminal row, so capping height at 100%
+				// makes it fill the whole terminal.
+				{ overlay: true, overlayOptions: { width: "100%", maxHeight: "100%" } },
 			);
 		},
 	});
