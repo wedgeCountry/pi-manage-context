@@ -50,13 +50,12 @@ view_context({ format: "detailed", showRetention: true }) → Shows retention re
 
 ### manage-context-tool.test.ts
 
-Tests for the `manage-context` and `manage_context_select` tools covering:
+Tests for the `manage-context` tool covering:
 
 #### Structure Tests
-- Tool name validation (both hyphenated and underscore versions)
+- Tool name validation
 - Parameter schema validation
 - Action options (list/select/unselect)
-- Backward compatibility between tool names
 
 #### Functional Tests - List Action
 - **Returns all turn units**: Verifies list returns entries with metadata
@@ -247,15 +246,7 @@ textMatch: "optimization" matches message containing "optimization"
 textMatch: "draft" OR groupIds: ["entry-5"]
 ```
 
-### 7. **Test Backward Compatibility**
 
-Ensure legacy tool name works identically:
-
-```typescript
-const tool1 = buildManageContextTool(pi);
-const tool2 = buildManageContextSelectTool(pi);
-expect(JSON.stringify(tool1.parameters)).toBe(JSON.stringify(tool2.parameters));
-```
 
 ## Future Test Additions
 

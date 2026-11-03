@@ -114,9 +114,9 @@ describe("runManageContext", () => {
 		const units = [makeUnit("e1", "hi there")];
 		const state = emptyState();
 
-		const result = runManageContext(units, state, { action: "select" }, "manage_context_select");
+		const result = runManageContext(units, state, { action: "select" }, "manage-context");
 
 		expect(result.changed).toBe(false);
-		expect(result.content[0].text).toBe("manage_context_select: provide textMatch and/or groupIds to select/unselect units.");
+		expect(result.content[0].text).toBe("manage-context: provide textMatch and/or groupIds to select/unselect units.");
 	});
 });

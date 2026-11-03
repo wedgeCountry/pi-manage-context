@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext, SessionEntry, SessionMessageEntry } from "@earendil-works/pi-coding-agent";
 import type { UserMessage, AssistantMessage } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
-import { buildManageContextSelectTool } from "../src/tools/manage-context.ts";
+import { buildManageContextTool } from "../src/tools/manage-context.ts";
 import type { LLMMemoryEntry } from "../src/llm-export.ts";
 
 function userEntry(id: string, text: string): SessionMessageEntry {
@@ -87,11 +87,11 @@ function makeHarness(entries: SessionEntry[]): { pi: ExtensionAPI; ctx: Extensio
   return { pi, ctx };
 }
 
-describe("manage_context_select tool", () => {
+describe("manage-context tool", () => {
   it("lists every turn unit with its groupId, heading, and current mark", async () => {
     const entries = [userEntry("e1", "Please refactor the auth module"), userEntry("e2", "hi there")];
     const { pi, ctx } = makeHarness(entries);
-    const tool = buildManageContextSelectTool(pi);
+    const tool = buildManageContextTool(pi);
 
     const result = await tool.execute("call_1", { action: "list" }, undefined, undefined, ctx);
 
@@ -108,7 +108,7 @@ describe("manage_context_select tool", () => {
       assistantTextEntry("e3", "Sure, refactoring now"),
     ];
     const { pi, ctx } = makeHarness(entries);
-    const tool = buildManageContextSelectTool(pi);
+    const tool = buildManageContextTool(pi);
 
     const result = await tool.execute("call_1", { action: "unselect", textMatch: "REFACTOR" }, undefined, undefined, ctx);
 
@@ -131,7 +131,7 @@ describe("manage_context_select tool", () => {
       toolResultEntry("e6", "call_2", "write_file", "Wrote proof.txt"),
     ];
     const { pi, ctx } = makeHarness(entries);
-    const tool = buildManageContextSelectTool(pi);
+    const tool = buildManageContextTool(pi);
 
     // Sanity check the bug this guards against: the tool-call unit's heading
     // really is the generic placeholder, not anything topic-specific.
@@ -153,7 +153,7 @@ describe("manage_context_select tool", () => {
   it("re-selects a previously unselected unit by groupId", async () => {
     const entries = [userEntry("e1", "Please refactor the auth module"), userEntry("e2", "hi there")];
     const { pi, ctx } = makeHarness(entries);
-    const tool = buildManageContextSelectTool(pi);
+    const tool = buildManageContextTool(pi);
 
     await tool.execute("call_1", { action: "unselect", groupIds: ["e1"] }, undefined, undefined, ctx);
     const reselect = await tool.execute("call_2", { action: "select", groupIds: ["e1"] }, undefined, undefined, ctx);
@@ -171,7 +171,7 @@ describe("manage_context_select tool", () => {
       userEntry("e3", "unrelated message"),
     ];
     const { pi, ctx } = makeHarness(entries);
-    const tool = buildManageContextSelectTool(pi);
+    const tool = buildManageContextTool(pi);
 
     const result = await tool.execute(
       "call_1",
@@ -187,7 +187,7 @@ describe("manage_context_select tool", () => {
   it("reports no match instead of throwing when nothing matches", async () => {
     const entries = [userEntry("e1", "hi there")];
     const { pi, ctx } = makeHarness(entries);
-    const tool = buildManageContextSelectTool(pi);
+    const tool = buildManageContextTool(pi);
 
     const result = await tool.execute("call_1", { action: "unselect", textMatch: "nonexistent" }, undefined, undefined, ctx);
 
@@ -198,7 +198,7 @@ describe("manage_context_select tool", () => {
   it("refuses to select/unselect without a filter, leaving marks untouched", async () => {
     const entries = [userEntry("e1", "hi there")];
     const { pi, ctx } = makeHarness(entries);
-    const tool = buildManageContextSelectTool(pi);
+    const tool = buildManageContextTool(pi);
 
     const result = await tool.execute("call_1", { action: "unselect" }, undefined, undefined, ctx);
 

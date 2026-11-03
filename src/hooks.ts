@@ -7,8 +7,7 @@
  * The manage-context tool's own tool call + result are auto-unselected right
  * after it runs (see the "tool_result" hook below) — otherwise every
  * subsequent turn would keep re-sending the tool call that was supposed to
- * shrink the context, defeating the point. Both registered names count (the
- * tool is registered under two names sharing one implementation).
+ * shrink the context, defeating the point.
  */
 
 import { resolve } from "node:path";
@@ -19,7 +18,7 @@ import { buildFilteredMessages } from "./context-filter.ts";
 import { loadState, saveState, hasMarks, pruneMarks } from "./state.ts";
 import { buildTurnUnitGroups, buildTurnUnits, type TurnUnit } from "./turn-units.ts";
 
-export const SELF_UNSELECT_TOOL_NAMES = new Set(["manage-context", "manage_context_select"]);
+export const SELF_UNSELECT_TOOL_NAMES = new Set(["manage-context"]);
 
 /**
  * True if `unit`'s anchor assistant message has exactly one tool call and

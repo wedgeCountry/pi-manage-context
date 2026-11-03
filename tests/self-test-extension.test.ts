@@ -95,11 +95,7 @@ maybeDescribe("extension (unselect integration)", () => {
             session.dispose();
         }
 
-        // The tool is registered under two names sharing one implementation —
-        // the model is free to call either.
-        expect(calls.some((c) => c.toolName === "manage-context" || c.toolName === "manage_context_select")).toBe(
-            true,
-        );
+        expect(calls.some((c) => c.toolName === "manage-context")).toBe(true);
         for (const call of calls) expect(call.isError).toBe(false);
         expect(entriesAfter.length).toBeGreaterThan(entriesBefore.length);
 
@@ -124,7 +120,7 @@ maybeDescribe("extension (unselect integration)", () => {
         // it explicitly. But only the *last* such call auto-hides — if the
         // model called the tool more than once, earlier calls stay visible
         // rather than all of them silently vanishing.
-        const SELF_TOOL_NAMES = new Set(["manage-context", "manage_context_select"]);
+        const SELF_TOOL_NAMES = new Set(["manage-context"]);
         const selfToolCallIds = (u: (typeof units)[number]): string[] => {
             if (u.anchorEntry.type !== "message" || u.anchorEntry.message.role !== "assistant") return [];
             return u.anchorEntry.message.content

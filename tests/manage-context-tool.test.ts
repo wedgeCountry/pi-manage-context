@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { buildManageContextTool, buildManageContextSelectTool } from "../src/tools/manage-context.ts";
+import { buildManageContextTool } from "../src/tools/manage-context.ts";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 
@@ -370,46 +370,6 @@ describe("manage-context tool", () => {
 			const text = (result.content[0] as any).text;
 			expect(text).toContain("Marked 1 unit(s)");
 		});
-	});
-});
-
-describe("manage_context_select tool (legacy)", () => {
-	it("exports a tool with the underscore name", () => {
-		const tool = buildManageContextSelectTool(mockPi);
-		
-		expect(tool.name).toBe("manage_context_select");
-		expect(tool.label).toBe("Manage context (select)");
-		expect(tool.description).toContain("list/select/unselect");
-	});
-
-	it("has the same parameter schema as manage-context", () => {
-		const tool1 = buildManageContextTool(mockPi);
-		const tool2 = buildManageContextSelectTool(mockPi);
-		
-		// Both should have the same parameter schema
-		expect(JSON.stringify(tool1.parameters)).toBe(JSON.stringify(tool2.parameters));
-		
-		// Both should have execute functions
-		expect(tool1.execute).toBeDefined();
-		expect(tool2.execute).toBeDefined();
-	});
-
-	it("functions identically to manage-context", async () => {
-		const tool1 = buildManageContextTool(mockPi);
-		const tool2 = buildManageContextSelectTool(mockPi);
-		
-		const entries: SessionEntry[] = [
-			createUserMessageEntry("entry-1", "Test"),
-		];
-		const mockCtx = createMockContext(entries);
-		
-		// Both should handle list action
-		const result1 = await tool1.execute("test-call", { action: "list" }, undefined, undefined, mockCtx);
-		const result2 = await tool2.execute("test-call", { action: "list" }, undefined, undefined, mockCtx);
-		
-		// Results should be structurally identical
-		expect(result1.content[0].type).toBe(result2.content[0].type);
-		expect(typeof result1.content[0]).toBe(typeof result2.content[0]);
 	});
 });
 

@@ -1,5 +1,5 @@
 /**
- * manage-context / manage_context_select — the agent-facing counterpart to
+ * manage-context — the agent-facing counterpart to
  * the interactive picker in view.ts. Lets the model itself list turn units
  * and flip their selected/unselected mark by a text match or groupId,
  * without a human at the keyboard.
@@ -27,7 +27,6 @@
 import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 import {
-	MANAGE_CONTEXT_SELECT_TOOL_DEFINITION,
 	MANAGE_CONTEXT_TOOL_DEFINITION,
 	type ManageContextParams,
 } from "../tool_definitions/manage-context.ts";
@@ -166,15 +165,6 @@ export function buildManageContextTool(pi: ExtensionAPI): ToolDefinition<typeof 
 	return buildManageContextToolImpl(pi, MANAGE_CONTEXT_TOOL_DEFINITION);
 }
 
-/** Legacy underscore alias, kept for backward compatibility. */
-export function buildManageContextSelectTool(pi: ExtensionAPI): ToolDefinition<typeof MANAGE_CONTEXT_TOOL_DEFINITION.parameters, unknown> {
-	return buildManageContextToolImpl(pi, MANAGE_CONTEXT_SELECT_TOOL_DEFINITION);
-}
-
 export function registerManageContextTool(pi: ExtensionAPI): void {
 	pi.registerTool(buildManageContextTool(pi));
-}
-
-export function registerManageContextSelectTool(pi: ExtensionAPI): void {
-	pi.registerTool(buildManageContextSelectTool(pi));
 }
