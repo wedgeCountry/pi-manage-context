@@ -1,7 +1,11 @@
 /**
  * Rebuilds the outgoing message array for one LLM call by applying the
  * current marks (selected / unselected / compressed / deleted) to turn
- * units.
+ * unit groups.
+ *
+ * Works on the cheap structural groups (buildTurnUnitGroups) rather than
+ * fully enriched units: this runs on the "context" event, i.e. every LLM
+ * call, so it must not pay for metadata it never reads.
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -9,7 +13,7 @@ import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { sessionEntryToContextMessages } from "@earendil-works/pi-coding-agent";
 
 import type { ManageContextState } from "./state.ts";
-import type { TurnUnit } from "./turn-units.ts";
+import type { TurnUnitGroup } from "./turn-units.ts";
 
 function cloneWithReplacedContent(message: AgentMessage, compressedText: string): AgentMessage {
 	const anyMsg = message as unknown as Record<string, unknown> & { role: string };
@@ -20,8 +24,8 @@ function cloneWithReplacedContent(message: AgentMessage, compressedText: string)
 	return { ...(message as any), content: compressedText };
 }
 
-export function buildCompressedReplacement(unit: TurnUnit, compressedText: string): AgentMessage[] {
-	if (unit.kind === "assistant_tool") {
+export function buildCompressedReplacement(group: TurnUnitGroup, compressedText: string): AgentMessage[] {
+	if (group.kind === "assistant_tool") {
 		// No single original message can safely stand in for a whole
 		// call+result group, so we synthesize a plain user-role note. This is
 		// always structurally valid, regardless of provider.
@@ -38,39 +42,19 @@ export function buildCompressedReplacement(unit: TurnUnit, compressedText: strin
 	// invariant we don't control — only the first message stands in for the
 	// compressed summary; anything beyond it is kept as-is rather than
 	// silently dropped.
-	const [original, ...rest] = sessionEntryToContextMessages(unit.anchorEntry);
+	const [original, ...rest] = sessionEntryToContextMessages(group.anchorEntry);
 	return [cloneWithReplacedContent(original, compressedText), ...rest];
-}
-
-/**
- * Calculate token savings and determine if compression is beneficial.
- */
-export function shouldCompress(unit: TurnUnit): boolean {
-	// Don't compress very small entries
-	if (unit.tokenEstimate < 100) return false;
-	
-	// Don't compress already compressed entries (no original text available)
-	if (unit.metadata.summary.length < 50) return false;
-	
-	// High importance entries (90+) should generally be kept uncompressed
-	// unless they're very large
-	if (unit.metadata.importanceScore >= 90 && unit.tokenEstimate < 2000) return false;
-	
-	// Medium importance entries can be compressed if large
-	if (unit.metadata.importanceScore >= 50 && unit.tokenEstimate < 500) return false;
-	
-	// Otherwise, compression is beneficial
-	return true;
 }
 
 /** Rebuilds the outgoing message array for one LLM call, applying all marks. */
 export function buildFilteredMessages(
 	entries: SessionEntry[],
-	units: TurnUnit[],
+	units: TurnUnitGroup[],
 	state: ManageContextState,
 ): AgentMessage[] {
-	const unitByEntryId = new Map<string, TurnUnit>();
+	const unitByEntryId = new Map<string, TurnUnitGroup>();
 	for (const u of units) for (const id of u.entryIds) unitByEntryId.set(id, u);
+	const entryById = new Map(entries.map((e) => [e.id, e]));
 
 	const out: AgentMessage[] = [];
 	const emitted = new Set<string>();
@@ -100,7 +84,7 @@ export function buildFilteredMessages(
 		}
 		// "selected" (default), or "compressed" not yet realized this session
 		// (e.g. process was interrupted before Esc) — fall back to originals.
-		for (const id of unit.entryIds) out.push(...sessionEntryToContextMessages(entries.find((e) => e.id === id)!));
+		for (const id of unit.entryIds) out.push(...sessionEntryToContextMessages(entryById.get(id)!));
 	}
 
 	return out;

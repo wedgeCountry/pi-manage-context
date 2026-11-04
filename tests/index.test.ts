@@ -150,11 +150,11 @@ describe("unitHasMatchingToolCallId", () => {
   });
 
   it("does not match even when every call in the bundle is itself self-unselect-eligible", () => {
-    // Conservative on purpose: two manage-context-family calls bundled
-    // together still isn't the single-call shape this is scoped to handle.
+    // Conservative on purpose: two manage-context calls bundled together
+    // still isn't the single-call shape this is scoped to handle.
     const entry = toolCallEntry("entry_1", [
       { toolCallId: "call_1", toolName: "manage-context", args: {} },
-      { toolCallId: "call_2", toolName: "manage_context_select", args: {} },
+      { toolCallId: "call_2", toolName: "manage-context", args: {} },
     ]);
     const unit = assistantToolUnit(entry);
 

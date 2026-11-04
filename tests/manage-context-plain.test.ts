@@ -23,7 +23,6 @@ function makeUnit(groupId: string, heading: string, opts: Partial<TurnUnit> = {}
 			type: "user_message",
 			timestamp: "0",
 			summary: heading,
-			importanceScore: 50,
 		},
 		...opts,
 	};
@@ -41,7 +40,6 @@ describe("unitSearchText / unitMatches", () => {
 				type: "tool_interaction",
 				timestamp: "0",
 				summary: "Executed write_file",
-				importanceScore: 60,
 				toolCalls: [{ name: "write_file", arguments: { path: "poem.txt" }, result: "Wrote poem.txt", description: "✓ Wrote poem.txt" }],
 			},
 		});
@@ -116,9 +114,9 @@ describe("runManageContext", () => {
 		const units = [makeUnit("e1", "hi there")];
 		const state = emptyState();
 
-		const result = runManageContext(units, state, { action: "select" }, "manage_context_select");
+		const result = runManageContext(units, state, { action: "select" }, "manage-context");
 
 		expect(result.changed).toBe(false);
-		expect(result.content[0].text).toBe("manage_context_select: provide textMatch and/or groupIds to select/unselect units.");
+		expect(result.content[0].text).toBe("manage-context: provide textMatch and/or groupIds to select/unselect units.");
 	});
 });

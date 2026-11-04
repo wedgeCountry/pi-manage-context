@@ -15,9 +15,6 @@ export const VIEW_CONTEXT_PARAMETERS = Type.Object({
 	includeDeleted: Type.Optional(
 		Type.Boolean({ description: "If true, include entries marked as 'deleted'. Defaults to false." }),
 	),
-	showRetention: Type.Optional(
-		Type.Boolean({ description: "If true, show retention analysis for each entry. Only applies to 'detailed' format. Defaults to false." }),
-	),
 });
 
 export type ViewContextParams = Static<typeof VIEW_CONTEXT_PARAMETERS>;
@@ -27,7 +24,7 @@ export const VIEW_CONTEXT_TOOL_DEFINITION = {
 	label: "View context overview",
 	description:
 		"Create a readable overview of your conversation context, similar to what the user sees in the /manage_context picker. " +
-		"Shows all turn units with their metadata, token counts, importance scores, and current selection status. " +
+		"Shows all turn units with their metadata, token counts, and current selection status. " +
 		"Use this to understand what's in your context before deciding what to compress or unselect.",
 	promptSnippet: "view_context — get a readable overview of your conversation context",
 	parameters: VIEW_CONTEXT_PARAMETERS,

@@ -52,21 +52,18 @@ import { loadState } from "../src/state.ts";
 import { buildTurnUnits } from "../src/turn-units.ts";
 import { buildFilteredMessages } from "../src/context-filter.ts";
 
-/** Settings from the global pi dir (~/.pi/agent/settings.json), not in-memory. */
-const createGlobalSettingsManager = () => SettingsManager.create(process.cwd(), getAgentDir());
-
-/** Session helper shared by both real-LLM tests: global settings + credentials. */
-async function createGlobalSession() {
-    const settingsManager = createGlobalSettingsManager();
-    const loader = new DefaultResourceLoader({
-        cwd: process.cwd(),
-        agentDir: getAgentDir(),
-        settingsManager,
-        noExtensions: true,
-        noSkills: true,
-        extensionFactories: [extension],
-    });
-    await loader.reload();
+describe("extension (integration)", () => {
+    it("agent calls the view_context tool successfully", async () => {
+        const settingsManager = SettingsManager.inMemory();
+        const loader = new DefaultResourceLoader({
+            cwd: process.cwd(),
+            agentDir: getAgentDir(),
+            settingsManager,
+            noExtensions: true,
+            noSkills: true,
+            extensionFactories: [extension],
+        });
+        await loader.reload();
 
     return createAgentSession({
         modelRuntime: await ModelRuntime.create(),
@@ -106,8 +103,25 @@ describe("extension (integration)", () => {
 });
 
 describe("extension (unselect integration)", () => {
-    maybeIt("agent calls the manage-context tool successfully unselecting all messages", async () => {
-        const { session } = await createGlobalSession();
+    it("agent calls the manage-context tool successfully unselecting all messages", async () => {
+        const settingsManager = SettingsManager.inMemory();
+        const loader = new DefaultResourceLoader({
+            cwd: process.cwd(),
+            agentDir: getAgentDir(),
+            settingsManager,
+            noExtensions: true,
+            noSkills: true,
+            extensionFactories: [extension],
+        });
+        await loader.reload();
+
+        const { session } = await createAgentSession({
+            modelRuntime: await ModelRuntime.create(),
+            resourceLoader: loader,
+            sessionManager: SessionManager.inMemory(),
+            settingsManager,
+            noTools: "builtin", // only extension tools are available
+        });
 
         const calls: { toolName: string; isError: boolean }[] = [];
         session.subscribe((e) => {

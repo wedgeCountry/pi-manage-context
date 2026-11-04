@@ -22,7 +22,6 @@ export function exportUnitToMarkdown(unit: TurnUnit): string {
 	lines.push(`**Type**: ${unit.metadata.type}`);
 	lines.push(`**Timestamp**: ${unit.metadata.timestamp}`);
 	lines.push(`**Token Count**: ${unit.tokenEstimate}`);
-	lines.push(`**Importance Score**: ${unit.metadata.importanceScore}/100`);
 	lines.push("");
 	
 	// Tool calls (if applicable)
@@ -47,23 +46,6 @@ export function exportUnitToMarkdown(unit: TurnUnit): string {
 	}
 	
 	// Key facts
-	if (unit.metadata.keyFacts && unit.metadata.keyFacts.length > 0) {
-		lines.push("## Key Facts");
-		lines.push("");
-		unit.metadata.keyFacts.forEach(fact => {
-			lines.push(`- ${fact}`);
-		});
-		lines.push("");
-	}
-	
-	// Retention reason
-	if (unit.metadata.retentionReason) {
-		lines.push("## Retention Reason");
-		lines.push("");
-		lines.push(unit.metadata.retentionReason);
-		lines.push("");
-	}
-	
 	// Content
 	lines.push("## Content");
 	lines.push("");
@@ -135,14 +117,9 @@ export function exportUnitsToMarkdown(
 		lines.push("");
 		
 		const totalTokens = units.reduce((sum, u) => sum + u.tokenEstimate, 0);
-		const avgImportance = units.length > 0 
-			? Math.round(units.reduce((sum, u) => sum + u.metadata.importanceScore, 0) / units.length)
-			: 0;
-		
 		lines.push(`- **Total Entries**: ${units.length}`);
 		lines.push(`- **Total Tokens**: ${totalTokens}`);
-		lines.push(`- **Average Importance**: ${avgImportance}/100`);
-		
+
 		// Count by type
 		const typeCounts: Record<string, number> = {};
 		units.forEach(unit => {

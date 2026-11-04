@@ -6,6 +6,13 @@
  * pairing valid) one assistant message THAT MADE TOOL CALLS together with
  * every tool_result entry those calls produced. All entries in a unit are
  * selected / unselected / compressed / deleted together, as a single row.
+ *
+ * Two build levels:
+ * - buildTurnUnitGroups() — cheap, structural grouping only. Used on hot
+ *   paths (the "context" event fires on every LLM call) where full metadata
+ *   would be wasted work.
+ * - buildTurnUnits() — groups plus display metadata (heading, preview,
+ *   summary, tool calls). Used by the picker, the tools, and the export.
  */
 
 import type { AssistantMessage, ImageContent, TextContent } from "@earendil-works/pi-ai";
@@ -15,7 +22,12 @@ import { estimateTokens, sessionEntryToContextMessages } from "@earendil-works/p
 export type TurnUnitKind = "user" | "assistant_text" | "assistant_tool" | "custom_message";
 
 /**
- * Structured metadata about a turn unit, designed for LLM decision-making.
+ * Structured metadata about a turn unit. Deliberately limited to what is
+ * cheap to compute and honest to report — heading, type, timestamps, tool
+ * call details, and a capped content summary. No importance scores or
+ * extracted "key facts": those were regex heuristics whose fabricated
+ * numbers leaked into LLM-facing output and steered retention decisions
+ * worse than no numbers at all.
  */
 export interface TurnUnitMetadata {
 	/** Clear heading summarizing the entry's purpose */
@@ -37,25 +49,26 @@ export interface TurnUnitMetadata {
 	}>;
 	/** Summary of the entry's content */
 	summary: string;
-	/** Key facts extracted for LLM retention decisions */
-	keyFacts?: string[];
-	/** Importance score (0-100) based on content analysis */
-	importanceScore: number;
-	/** Why this entry might be important to retain */
-	retentionReason?: string;
 }
 
-export interface TurnUnit {
+/**
+ * The structural half of a turn unit: which session entries belong together
+ * and why. Everything the context filter needs, nothing more.
+ */
+export interface TurnUnitGroup {
 	groupId: string;
 	kind: TurnUnitKind;
 	/** All session entry ids this unit covers, in order (anchor first). */
 	entryIds: string[];
 	anchorEntry: SessionEntry;
 	resultEntries: SessionMessageEntry[];
+}
+
+export interface TurnUnit extends TurnUnitGroup {
 	timestamp: string;
 	preview: string;
 	tokenEstimate: number;
-	/** Rich metadata for display and LLM decisions */
+	/** Display/LLM metadata (heading, summary, tool calls). */
 	metadata: TurnUnitMetadata;
 }
 
@@ -111,12 +124,10 @@ export function generateHeading(kind: TurnUnitKind, content: string): string {
 	switch (kind) {
 		case "user":
 			if (content.length === 0) return "Empty message";
-			const firstLine = content.split("\n")[0];
-			return oneLine(firstLine, 60) || "User message";
+			return oneLine(content.split("\n")[0], 60) || "User message";
 		case "assistant_text":
 			if (content.length === 0) return "Empty response";
-			const responseFirstLine = content.split("\n")[0];
-			return oneLine(responseFirstLine, 60) || "Assistant response";
+			return oneLine(content.split("\n")[0], 60) || "Assistant response";
 		case "assistant_tool":
 			return "Tool interactions";
 		case "custom_message":
@@ -124,114 +135,14 @@ export function generateHeading(kind: TurnUnitKind, content: string): string {
 	}
 }
 
-/**
- * Extract key facts from content that might be important for retention.
- */
-export function extractKeyFacts(kind: TurnUnitKind, content: string): string[] {
-	const facts: string[] = [];
-	
-	// Look for file paths
-	const filePathRegex = /["']?([^"'\s]*\.(?:ts|tsx|js|jsx|json|md|css|scss|html|yaml|yml))["']?/g;
-	const filePathMatches = content.match(filePathRegex);
-	if (filePathMatches) {
-		facts.push(`Files referenced: ${Array.from(new Set(filePathMatches)).join(", ")}`);
-	}
-	
-	// Look for commands or code blocks
-	const codeBlockRegex = /```(\w+)?\s*([\s\S]*?)```/g;
-	const codeMatches = content.match(codeBlockRegex);
-	if (codeMatches) {
-		facts.push(`Code blocks: ${codeMatches.length}`);
-	}
-	
-	// Look for important keywords
-	const importantKeywords = ["error", "fixed", "added", "changed", "removed", "warning", "critical", "important"];
-	const foundKeywords = importantKeywords.filter(k => content.toLowerCase().includes(k));
-	if (foundKeywords.length > 0) {
-		facts.push(`Contains: ${foundKeywords.join(", ")}`);
-	}
-	
-	// Look for URLs or identifiers
-	const urlRegex = /https?:\/\/[^\s"]+/g;
-	const urlMatches = content.match(urlRegex);
-	if (urlMatches) {
-		facts.push(`URLs: ${urlMatches.length}`);
-	}
-	
-	// Look for numbers that might be important
-	const numberRegex = /\b\d+\b/g;
-	const numbers = content.match(numberRegex);
-	if (numbers && numbers.length > 3) {
-		facts.push(`Contains ${numbers.length} numeric values`);
-	}
-	
-	return facts;
-}
-
-/**
- * Calculate an importance score (0-100) for an entry.
- */
-export function calculateImportanceScore(kind: TurnUnitKind, content: string, metadata?: Partial<TurnUnitMetadata>): number {
-	let score = 50; // Base score
-	
-	// Boost for user messages (instructions)
-	if (kind === "user") {
-		score += 20;
-	}
-	
-	// Boost for tool interactions with results
-	if (kind === "assistant_tool" && metadata?.toolCalls) {
-		score += 15;
-		// Bonus for successful tool calls
-		const successfulTools = metadata.toolCalls.filter(tc => tc.description && tc.description.toLowerCase().includes("✓"));
-		score += successfulTools.length * 5;
-	}
-	
-	// Boost for entries with key facts
-	if (metadata?.keyFacts && metadata.keyFacts.length > 0) {
-		score += Math.min(metadata.keyFacts.length * 3, 15);
-	}
-	
-	// Boost for entries with file paths
-	if (content.includes(".ts") || content.includes(".js") || content.includes(".json")) {
-		score += 10;
-	}
-	
-	// Clamp to 0-100
-	return Math.max(0, Math.min(100, score));
-}
-
-/**
- * Generate a retention reason based on content analysis.
- */
-export function generateRetentionReason(kind: TurnUnitKind, content: string, metadata?: Partial<TurnUnitMetadata>): string | undefined {
-	if (kind === "user") {
-		return "Contains user instructions or requirements";
-	}
-	
-	if (kind === "assistant_tool" && metadata?.toolCalls) {
-		if (metadata.toolCalls.some(tc => tc.description?.includes("error") || tc.description?.includes("failed"))) {
-			return "Contains error information or debugging context";
-		}
-		
-		const hasFileOps = metadata.toolCalls.some(tc => 
-			tc.name.includes("file") || tc.name.includes("read") || tc.name.includes("write")
-		);
-		if (hasFileOps) {
-			return "Contains file operations and changes";
-		}
-	}
-	
-	return "Maintains conversation context and decisions";
-}
-
 export function contentToPreviewText(content: string | (TextContent | ImageContent)[]): string {
 	if (typeof content === "string") return content;
 	return content.map((c) => (c.type === "text" ? c.text : "[image]")).join(" ");
 }
 
-export function buildTurnUnits(entries: SessionEntry[]): TurnUnit[] {
-	const units: TurnUnit[] = [];
+/** Groups raw session entries into structural turn-unit groups, without any metadata work. */
+export function buildTurnUnitGroups(entries: SessionEntry[]): TurnUnitGroup[] {
+	const groups: TurnUnitGroup[] = [];
 
 	for (let i = 0; i < entries.length; i++) {
 		const entry = entries[i];
@@ -280,160 +191,34 @@ export function buildTurnUnits(entries: SessionEntry[]): TurnUnit[] {
 				break;
 			}
 
-			const callSummaries = entry.message.content
-				.filter((c) => c.type === "toolCall")
-				.map((c) => c.name)
-				.join(", ");
-			const pieces = [entry, ...resultEntries].flatMap((e) => sessionEntryToContextMessages(e));
-			
-			// Extract tool call details
-			const toolCalls = entry.message.content
-				.filter((c) => c.type === "toolCall")
-				.map((call) => {
-					const result = resultEntries.find(
-						(r) => r.message.role === "toolResult" && r.message.toolCallId === call.id,
-					);
-					// Capped like every other text path here (preserveLineBreaks is used
-					// for user/assistant/custom_message summaries below) — an uncapped
-					// tool result (e.g. a large file read) would make this unit's own
-					// list/textMatch footprint as big as the context the
-					// manage-context tool exists to shrink.
-					const resultText =
-						result && result.message.role === "toolResult"
-							? preserveLineBreaks(contentToPreviewText(result.message.content))
-							: "(no result yet)";
-					return {
-						name: call.name,
-						arguments: extractToolArguments(call.arguments),
-						result: resultText,
-						description: resultText.startsWith("Error") || resultText.includes("failed")
-							? `✗ ${resultText}`
-							: `✓ ${resultText}`,
-					};
-				});
-			
-			// Generate heading, key facts, and retention reason
-			const summary = `Executed ${callSummaries}${remaining.size > 0 ? " (awaiting results)" : ""}`;
-			const contentForAnalysis = JSON.stringify(toolCalls, null, 2);
-			const keyFacts = extractKeyFacts("assistant_tool", contentForAnalysis);
-			const importanceScore = calculateImportanceScore("assistant_tool", contentForAnalysis, {
-				heading: "Tool interactions",
-				type: "tool_interaction",
-				timestamp: entry.timestamp,
-				toolCalls,
-				summary,
-				keyFacts,
-			});
-			
-			units.push({
+			groups.push({
 				groupId: entry.id,
 				kind: "assistant_tool",
 				entryIds,
 				anchorEntry: entry,
 				resultEntries,
-				timestamp: entry.timestamp,
-				preview: `tool call: ${callSummaries}${remaining.size > 0 ? " (awaiting result)" : ""}`,
-				tokenEstimate: pieces.reduce((sum, m) => sum + estimateTokens(m), 0),
-				metadata: {
-					heading: "Tool interactions",
-					type: "tool_interaction",
-					timestamp: entry.timestamp,
-					toolCalls,
-					summary,
-					keyFacts,
-					importanceScore,
-					retentionReason: generateRetentionReason("assistant_tool", contentForAnalysis, {
-						heading: "Tool interactions",
-						type: "tool_interaction",
-						timestamp: entry.timestamp,
-						toolCalls,
-						summary,
-						keyFacts,
-					}),
-				},
 			});
 			continue;
 		}
 
 		if (entry.type === "message" && (entry.message.role === "user" || entry.message.role === "assistant")) {
-			const kind: TurnUnitKind = entry.message.role === "user" ? "user" : "assistant_text";
-			const text =
-				entry.message.role === "user"
-					? contentToPreviewText(entry.message.content)
-					: entry.message.content
-							.filter((c): c is TextContent => c.type === "text")
-							.map((c) => c.text)
-							.join(" ");
-			const messages = sessionEntryToContextMessages(entry);
-			
-			// Generate metadata for regular messages
-			const heading = generateHeading(kind, text);
-			const keyFacts = extractKeyFacts(kind, text);
-			const importanceScore = calculateImportanceScore(kind, text);
-			
-			units.push({
+			groups.push({
 				groupId: entry.id,
-				kind,
+				kind: entry.message.role === "user" ? "user" : "assistant_text",
 				entryIds: [entry.id],
 				anchorEntry: entry,
 				resultEntries: [],
-				timestamp: entry.timestamp,
-				preview: `${kind === "user" ? "user" : "assistant"}: ${oneLine(text)}`,
-				tokenEstimate: messages.reduce((sum, m) => sum + estimateTokens(m), 0),
-				metadata: {
-					heading,
-					type: kind === "user" ? "user_message" : "assistant_response",
-					timestamp: entry.timestamp,
-					summary: preserveLineBreaks(text),
-					keyFacts,
-					importanceScore,
-					retentionReason: generateRetentionReason(kind, text, {
-						heading,
-						type: kind === "user" ? "user_message" : "assistant_response",
-						timestamp: entry.timestamp,
-						summary: preserveLineBreaks(text),
-						keyFacts,
-						importanceScore,
-					}),
-				},
 			});
 			continue;
 		}
 
 		if (entry.type === "custom_message") {
-			const text = contentToPreviewText(entry.content);
-			const messages = sessionEntryToContextMessages(entry);
-			
-			// Generate metadata for custom messages
-			const heading = generateHeading("custom_message", text);
-			const keyFacts = extractKeyFacts("custom_message", text);
-			const importanceScore = calculateImportanceScore("custom_message", text);
-			
-			units.push({
+			groups.push({
 				groupId: entry.id,
 				kind: "custom_message",
 				entryIds: [entry.id],
 				anchorEntry: entry,
 				resultEntries: [],
-				timestamp: entry.timestamp,
-				preview: `${entry.customType}: ${oneLine(text)}`,
-				tokenEstimate: messages.reduce((sum, m) => sum + estimateTokens(m), 0),
-				metadata: {
-					heading,
-					type: `custom_${entry.customType}`,
-					timestamp: entry.timestamp,
-					summary: preserveLineBreaks(text),
-					keyFacts,
-					importanceScore,
-					retentionReason: generateRetentionReason("custom_message", text, {
-						heading,
-						type: `custom_${entry.customType}`,
-						timestamp: entry.timestamp,
-						summary: preserveLineBreaks(text),
-						keyFacts,
-						importanceScore,
-					}),
-				},
 			});
 			continue;
 		}
@@ -443,5 +228,108 @@ export function buildTurnUnits(entries: SessionEntry[]): TurnUnit[] {
 		// left untouched by buildFilteredMessages() in context-filter.ts.
 	}
 
-	return units;
+	return groups;
+}
+
+/** Cheap facts shared by every unit kind: text, heading, token estimate. */
+function baseUnitTexts(group: TurnUnitGroup): { text: string; heading: string } {
+	if (group.kind === "assistant_tool") {
+		const entry = group.anchorEntry;
+		if (!hasToolCalls(entry)) return { text: "", heading: "Tool interactions" };
+		return { text: "", heading: "Tool interactions" };
+	}
+	if (group.kind === "custom_message") {
+		if (group.anchorEntry.type !== "custom_message") return { text: "", heading: "Custom message" };
+		const text = contentToPreviewText(group.anchorEntry.content);
+		return { text, heading: generateHeading("custom_message", text) };
+	}
+	if (group.anchorEntry.type !== "message") return { text: "", heading: "" };
+	const role = group.anchorEntry.message.role;
+	if (role !== "user" && role !== "assistant") return { text: "", heading: "" };
+	const text =
+		role === "user"
+			? contentToPreviewText(group.anchorEntry.message.content)
+			: group.anchorEntry.message.content
+					.filter((c): c is TextContent => c.type === "text")
+					.map((c) => c.text)
+					.join(" ");
+	const kind = role === "user" ? "user" : "assistant_text";
+	return { text, heading: generateHeading(kind, text) };
+}
+
+/** Metadata (heading, summary, tool calls) for one structural group. */
+export function enrichGroup(group: TurnUnitGroup): TurnUnitMetadata {
+	const timestamp = group.anchorEntry.timestamp;
+
+	if (group.kind === "assistant_tool") {
+		const entry = group.anchorEntry;
+		const toolCalls =
+			entry.type === "message" && entry.message.role === "assistant"
+				? entry.message.content
+						.filter((c) => c.type === "toolCall")
+						.map((call) => {
+							const result = group.resultEntries.find(
+								(r) => r.message.role === "toolResult" && r.message.toolCallId === call.id,
+							);
+							// Capped like every other text path here (preserveLineBreaks is used
+							// for user/assistant/custom_message summaries below) — an uncapped
+							// tool result (e.g. a large file read) would make this unit's own
+							// list/textMatch footprint as big as the context the
+							// manage-context tool exists to shrink.
+							const resultText =
+								result && result.message.role === "toolResult"
+									? preserveLineBreaks(contentToPreviewText(result.message.content))
+									: "(no result yet)";
+							return {
+								name: call.name,
+								arguments: extractToolArguments(call.arguments),
+								result: resultText,
+								description:
+									resultText.startsWith("Error") || resultText.includes("failed")
+										? `✗ ${resultText}`
+										: `✓ ${resultText}`,
+							};
+						})
+				: [];
+		const callSummaries = toolCalls.map((c) => c.name).join(", ");
+		return {
+			heading: "Tool interactions",
+			type: "tool_interaction",
+			timestamp,
+			toolCalls,
+			summary: `Executed ${callSummaries}${group.resultEntries.length < toolCalls.length ? " (awaiting results)" : ""}`,
+		};
+	}
+
+	const { text, heading } = baseUnitTexts(group);
+	return {
+		heading,
+		type:
+			group.kind === "user"
+				? "user_message"
+				: group.kind === "assistant_text"
+					? "assistant_response"
+					: group.kind === "custom_message" && group.anchorEntry.type === "custom_message"
+						? `custom_${group.anchorEntry.customType}`
+						: "custom_message",
+		timestamp,
+		summary: preserveLineBreaks(text),
+	};
+}
+
+export function buildTurnUnits(entries: SessionEntry[]): TurnUnit[] {
+	return buildTurnUnitGroups(entries).map((group) => {
+		const metadata = enrichGroup(group);
+		const pieces = [group.anchorEntry, ...group.resultEntries].flatMap((e) => sessionEntryToContextMessages(e));
+		return {
+			...group,
+			timestamp: group.anchorEntry.timestamp,
+			preview:
+				group.kind === "assistant_tool"
+					? `tool call: ${metadata.summary.replace(/^Executed /, "")}`
+					: `${group.kind === "user" ? "user" : group.kind === "assistant_text" ? "assistant" : "custom"}: ${oneLine(metadata.summary)}`,
+			tokenEstimate: pieces.reduce((sum, m) => sum + estimateTokens(m), 0),
+			metadata,
+		};
+	});
 }

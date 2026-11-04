@@ -1,11 +1,7 @@
 /**
  * Pure data for the manage-context tool: name/label/description, prompt copy,
  * and the typebox parameter schema. No logic lives here — see
- * src/tools/manage-context.ts for the plain function and registerXTool(pi).
- *
- * Registered under two names sharing one implementation: "manage-context" is
- * the current name, "manage_context_select" is a legacy underscore alias kept
- * for backward compatibility with sessions/prompts that already reference it.
+ * src/tools/manage-context.ts for the plain function and registerTool(pi).
  */
 
 import { Type, type Static } from "typebox";
@@ -45,10 +41,3 @@ export const MANAGE_CONTEXT_TOOL_DEFINITION = {
 	parameters: MANAGE_CONTEXT_PARAMETERS,
 };
 
-/** Hyphenated-name definition's underscore predecessor, kept for compatibility. */
-export const MANAGE_CONTEXT_SELECT_TOOL_DEFINITION = {
-	...MANAGE_CONTEXT_TOOL_DEFINITION,
-	name: "manage_context_select",
-	label: "Manage context (select)",
-	promptSnippet: "manage_context_select — list/select/unselect your own context turns by topic",
-};
