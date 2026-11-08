@@ -52,11 +52,11 @@ all go through `visibleTurnUnits()` (`src/turn-units.ts`) — the single
   onUpdate, ctx)` into a 2-arg hook, so no tool repeats framework plumbing.
   Each `src/tools/<tool>.ts` keeps a plain, `ExtensionContext`-free function
   (unit-tested directly) plus a thin `buildXTool(pi)` / `registerXTool(pi)`.
-  The context-marking tools are `context-select` / `context-unselect` — one
-  shared adapter (`buildContextMarkTool()` over the pure `runContextMark()`)
-  and one shared definition factory (`makeMarkToolDefinition()` in
-  `src/tool_definitions/context-mark.ts`, registered via
-  `registerContextMarkTools(pi)`), both in `src/tools/context-mark.ts` —
+  The context-marking tools are `context-select` / `context-unselect` — each
+  has its own explicit definition in `src/tool_definitions/<tool>.ts`, plus
+  one shared adapter (`buildContextMarkTool()` over the pure
+  `runContextMark()` in `src/tools/context-mark.ts`, registered via
+  `registerContextMarkTools(pi)`) —
   plus `context-autoselect` (adapter over `runAutoSelect()` in
   `src/tools/context-autoselect-engine.ts`). The subagent's instruction is
   not inline code: `src/tools/autoselect-prompt.ts` loads a template from
