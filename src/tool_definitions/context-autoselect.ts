@@ -22,16 +22,12 @@ export const CONTEXT_AUTOSELECT_PARAMETERS = Type.Object({
 export type ContextAutoselectParams = Static<typeof CONTEXT_AUTOSELECT_PARAMETERS>;
 
 const DESCRIPTION =
-	"Review all turn units in your own conversation context with a subagent and unselect the ones that are irrelevant or outdated for the current task. " +
-	"The subagent's only tool is context-unselect, so it can hide units but never select, compress, or delete them. " +
-	"Unselected units are hidden from your context on the next turn but are not deleted. " +
-	"Pass focus to describe the current task; pass dryRun: true to see what would be unselected without changing anything.";
+	"Review all turn units in your own conversation context with a subagent and unselect the ones that are irrelevant or outdated for the current task. ";
 
 export const CONTEXT_AUTOSELECT_TOOL_DEFINITION = {
 	name: "context-autoselect",
 	label: "Autoselect relevant context",
 	description: DESCRIPTION,
-	promptSnippet: "context-autoselect — let a subagent unselect irrelevant context turns",
 	parameters: CONTEXT_AUTOSELECT_PARAMETERS,
 	// Sequential: runs a multi-second subagent that does load-modify-save on
 	// shared state — a much wider race window than the other mark tools.
