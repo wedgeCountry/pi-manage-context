@@ -30,6 +30,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 import { CONTEXT_UNSELECT_TOOL_DEFINITION, type ContextUnselectParams } from "../tool_definitions/context-unselect.ts";
+import { DEFAULT_AUTOSELECT_TEMPLATE, loadAutoSelectTemplate, renderAutoSelectTask } from "./autoselect-prompt.ts";
 import { loadState, saveState, type ManageContextState } from "../state.ts";
 import { oneLine, preserveLineBreaks, type TurnUnit } from "../turn-units.ts";
 import { describeMark } from "../mark-status.ts";
@@ -83,21 +84,14 @@ export function buildAutoListing(units: TurnUnit[], state: ManageContextState): 
 		}));
 }
 
-/** The task prompt handed to the subagent: listing as JSON plus the focus. */
-export function buildAutoSelectTask(listing: AutoListingRow[], focus?: string): string {
-	return [
-		"You are reviewing the turn units of a conversation to decide which are irrelevant or outdated for the current task.",
-		focus ? `Current task: ${focus}` : "Current task: (not specified — judge relevance to the conversation as a whole)",
-		"",
-		"Turn units (JSON; groupId is the identifier, mark is the current state):",
-		JSON.stringify(listing, null, 2),
-		"",
-		"Instructions:",
-		'- Call context-unselect ONCE with the groupIds of the units that are irrelevant or outdated for the current task.',
-		"- Be conservative: when in doubt, keep the unit selected.",
-		"- The latest user turn is not in this list; do not reference it.",
-		"- If nothing should be unselected, call context-unselect with an empty groupIds array.",
-	].join("\n");
+/**
+ * The task prompt handed to the subagent: the instruction template (see
+ * src/tools/autoselect-prompt.ts — editable via prompts/context-autoselect.md
+ * or a per-project .pi/context-autoselect.md) with the listing and focus
+ * filled in.
+ */
+export function buildAutoSelectTask(listing: AutoListingRow[], focus?: string, template: string = DEFAULT_AUTOSELECT_TEMPLATE): string {
+	return renderAutoSelectTask(template, listing, focus);
 }
 
 /** Tool-result text for the parent model summarizing what the subagent did. */
@@ -235,7 +229,8 @@ export async function runAutoSelect(
 		sessionManager: SessionManager.inMemory(),
 		cwd: ctx.cwd,
 	});
-	await runChildSession(session, buildAutoSelectTask(listing, params.focus), signal);
+	const template = await loadAutoSelectTemplate(ctx.cwd);
+	await runChildSession(session, buildAutoSelectTask(listing, params.focus, template), signal);
 
 	const details = { unselected, dryRun };
 	return { content: [{ type: "text", text: summarizeAutoResult(details) }], details };

@@ -50,6 +50,18 @@ export, or the model's context.
 Matching is groupId-only. Unselected units are hidden from the model on its
 next turn but can be re-selected; they are not deleted.
 
+## Customizing the autoselect subagent prompt
+
+The instruction given to the `context-autoselect` subagent lives in its own
+editable file, [`prompts/context-autoselect.md`](prompts/context-autoselect.md),
+which is read at runtime — edit it and the change applies on the next run, no
+rebuild needed. It contains `{{focus}}` and `{{listing}}` placeholders that are
+filled in with the current task focus and the JSON listing of turn units.
+
+To override the prompt for a single project, place your own template at
+`.pi/context-autoselect.md` in the project directory; it takes precedence over
+the bundled file.
+
 ## Architecture
 
 See [architecture.md](architecture.md) for the design decisions (turn units,
