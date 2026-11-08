@@ -27,6 +27,21 @@ provider credential is available — an env API key (`ANTHROPIC_API_KEY`,
 `OPENAI_API_KEY`, `MISTRAL_API_KEY`, ...) or a stored `/login` credential in
 auth.json — and skip otherwise, so `npm test` stays green offline.
 
+### autoselect-real-llm.test.ts
+
+End-to-end `context-autoselect` test against a real LLM, run from bash:
+
+```bash
+npm test -- autoselect-real-llm
+```
+
+One session is started, the model is told to read `README.md` twice, then —
+in the same session — to auto-clean its context. Asserts that (1) the first
+read call ends up `unselected` and (2) the `context-autoselect` tool call
+itself is auto-unselected, i.e. absent from the filtered messages the LLM
+sees afterwards. Skips without a provider credential like the other
+real-LLM tests.
+
 ### integration.test.ts
 
 Not a vitest file — a pi selftest *extension script* (registers `my_tool` and a
