@@ -35,7 +35,16 @@ export function parseAutoArgs(args: string): { focus?: string } | null {
 	return focus ? { focus } : {};
 }
 
-/** Run context-autoselect from the /manage_context auto command and report the outcome. */
+/** Braille spinner frames for the footer status while autoselect runs. */
+const AUTOSELECT_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const AUTOSELECT_STATUS_KEY = "manage-context-autoselect";
+
+/**
+ * Run context-autoselect from the /manage_context auto command and report the
+ * outcome. While the subagent runs (it can take several seconds), an animated
+ * spinner is shown in the footer status; the status is cleared when done and
+ * the outcome is reported via notify as before.
+ */
 async function runAutoSelectCommand(pi: ExtensionAPI, ctx: ExtensionCommandContext, focus: string | undefined): Promise<void> {
 	const entries = ctx.sessionManager.buildContextEntries();
 	const state = loadState(ctx);
@@ -46,11 +55,21 @@ async function runAutoSelectCommand(pi: ExtensionAPI, ctx: ExtensionCommandConte
 	}
 
 	ctx.ui.notify("Running context-autoselect subagent…", "info");
+	let frame = 0;
+	const label = `context-autoselect running (reviewing ${units.length} unit(s))…`;
+	ctx.ui.setStatus(AUTOSELECT_STATUS_KEY, `${AUTOSELECT_SPINNER_FRAMES[0]} ${label}`);
+	const timer = setInterval(() => {
+		frame = (frame + 1) % AUTOSELECT_SPINNER_FRAMES.length;
+		ctx.ui.setStatus(AUTOSELECT_STATUS_KEY, `${AUTOSELECT_SPINNER_FRAMES[frame]} ${label}`);
+	}, 80);
 	try {
 		const result = await runAutoSelect(pi, ctx, units, state, { focus }, ctx.signal);
 		ctx.ui.notify(result.content[0].text.split("\n")[0], "info");
 	} catch (error) {
 		ctx.ui.notify(`context-autoselect failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+	} finally {
+		clearInterval(timer);
+		ctx.ui.setStatus(AUTOSELECT_STATUS_KEY, undefined);
 	}
 }
 
