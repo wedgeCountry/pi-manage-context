@@ -14,8 +14,12 @@
  * matches after the fact.
  */
 
-import type { ManageContextState, Mark } from "../state.ts";
-import { oneLine, type TurnUnit } from "../turn-units.ts";
+import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
+
+import type { CONTEXT_SELECT_TOOL_DEFINITION } from "../tool_definitions/context-select.ts";
+import type { CONTEXT_UNSELECT_TOOL_DEFINITION } from "../tool_definitions/context-unselect.ts";
+import { loadState, saveState, type ManageContextState, type Mark } from "../state.ts";
+import { buildTurnUnits, oneLine, type TurnUnit } from "../turn-units.ts";
 import { describeMark } from "../mark-status.ts";
 
 export interface ContextMarkResult {
@@ -83,5 +87,39 @@ export function runContextMark(
 		content: [{ type: "text", text: lines.join("\n") }],
 		details: affected,
 		changed: affected.length > 0,
+	};
+}
+
+/**
+ * The one shared adapter behind context-select and context-unselect: owns all
+ * framework plumbing (session entries, state load/save, UI notification) and
+ * delegates matching/mutation to runContextMark(). Marks written here are
+ * picked up by the "context" handler in src/hooks.ts on the very next model
+ * call — no separate apply step.
+ */
+export function buildContextMarkTool(
+	pi: ExtensionAPI,
+	definition: typeof CONTEXT_SELECT_TOOL_DEFINITION | typeof CONTEXT_UNSELECT_TOOL_DEFINITION,
+	action: "select" | "unselect",
+): ToolDefinition<typeof definition.parameters, unknown> {
+	return {
+		...definition,
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx: ExtensionContext) {
+			const entries = ctx.sessionManager.buildContextEntries();
+			const state = loadState(ctx);
+			const units = buildTurnUnits(entries).filter((u) => describeMark(u, state).effective !== "deleted");
+
+			const result = runContextMark(units, state, params.groupIds, action, definition.name);
+			if (result.changed) {
+				saveState(pi, state);
+				// select/unselect silently change what the model sees on its very
+				// next turn (see the "context" handler in src/hooks.ts) — surface it
+				// so a human watching the session has a visible trail of the agent
+				// editing its own context, instead of content just disappearing.
+				ctx.ui.notify(`${definition.name}: ${result.content[0].text.split("\n")[0]}`, "info");
+			}
+
+			return { content: result.content, details: result.details };
+		},
 	};
 }
