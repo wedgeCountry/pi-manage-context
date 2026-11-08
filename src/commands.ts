@@ -16,8 +16,7 @@ import type {
 
 import { exportUnitsToMarkdown } from "./markdown-export.ts";
 import { loadState, saveState } from "./state.ts";
-import { buildTurnUnits } from "./turn-units.ts";
-import { describeMark } from "./mark-status.ts";
+import { visibleTurnUnits } from "./turn-units.ts";
 import { runAutoSelect } from "./tools/context-autoselect-engine.ts";
 import { ManageContextView } from "./view.ts";
 import { PickerViewModel } from "./picker/picker-view-model.ts";
@@ -40,7 +39,7 @@ export function parseAutoArgs(args: string): { focus?: string } | null {
 async function runAutoSelectCommand(pi: ExtensionAPI, ctx: ExtensionCommandContext, focus: string | undefined): Promise<void> {
 	const entries = ctx.sessionManager.buildContextEntries();
 	const state = loadState(ctx);
-	const units = buildTurnUnits(entries).filter((u) => describeMark(u, state).effective !== "deleted");
+	const units = visibleTurnUnits(entries, state);
 	if (units.length === 0) {
 		ctx.ui.notify("No messages in context yet.", "info");
 		return;
@@ -116,7 +115,7 @@ export function registerCommands(pi: ExtensionAPI, cachedModels: () => Model<Api
 			// session file is append-only and still holds the raw entries — pi
 			// gives extensions no API to strike bytes from it — but nothing in
 			// this extension will ever surface them again.)
-			const units = buildTurnUnits(entries).filter((u) => state.marks[u.groupId]?.mark !== "deleted");
+			const units = visibleTurnUnits(entries, state);
 			if (units.length === 0) {
 				ctx.ui.notify("No messages in context yet.", "info");
 				return;
@@ -159,7 +158,7 @@ export function registerCommands(pi: ExtensionAPI, cachedModels: () => Model<Api
 			const entries = ctx.sessionManager.buildContextEntries();
 			// Deleted units are gone from the model's context by design — the
 			// export mirrors what the model actually sees, so they stay excluded.
-			const units = buildTurnUnits(entries).filter((u) => state.marks[u.groupId]?.mark !== "deleted");
+			const units = visibleTurnUnits(entries, state);
 			if (units.length === 0) {
 				ctx.ui.notify("No messages in context yet.", "info");
 				return;

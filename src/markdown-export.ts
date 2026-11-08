@@ -135,23 +135,3 @@ export function exportUnitsToMarkdown(
 	
 	return lines.join("\n");
 }
-
-/**
- * Export selected entries with marks as markdown.
- */
-export function exportFilteredUnitsToMarkdown(
-	units: TurnUnit[],
-	marks: Record<string, { mark: string }>,
-	options: {
-		title?: string;
-		groupByType?: boolean;
-		includeSummary?: boolean;
-		onlySelected?: boolean;
-	},
-): string {
-	const filteredUnits = options.onlySelected
-		? units.filter(unit => marks[unit.groupId]?.mark === "selected")
-		: units;
-	
-	return exportUnitsToMarkdown(filteredUnits, options);
-}

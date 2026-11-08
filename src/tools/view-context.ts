@@ -14,10 +14,30 @@ import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-age
 
 import { VIEW_CONTEXT_TOOL_DEFINITION, type ViewContextParams } from "../tool_definitions/view-context.ts";
 import { loadState, type ManageContextState } from "../state.ts";
-import { buildTurnUnits, type TurnUnit } from "../turn-units.ts";
+import { buildTurnUnits, visibleTurnUnits, type TurnUnit } from "../turn-units.ts";
 import { toLLMMemoryEntry } from "../llm-export.ts";
 import { describeMark } from "../mark-status.ts";
 import { createTool } from "./createTool.ts";
+
+/** Per-kind counts shared by the summary and llm-json formats. */
+function countByKind(units: TurnUnit[]) {
+	return {
+		user: units.filter((u) => u.kind === "user").length,
+		assistant: units.filter((u) => u.kind === "assistant_text").length,
+		tools: units.filter((u) => u.kind === "assistant_tool").length,
+		custom: units.filter((u) => u.kind === "custom_message").length,
+	};
+}
+
+/** Per-status (effective mark) counts shared by the summary and llm-json formats. */
+function countByStatus(units: TurnUnit[], state: ManageContextState) {
+	return {
+		selected: units.filter((u) => describeMark(u, state).effective === "selected").length,
+		unselected: units.filter((u) => describeMark(u, state).effective === "unselected").length,
+		compressed: units.filter((u) => describeMark(u, state).effective === "compressed").length,
+		deleted: units.filter((u) => describeMark(u, state).effective === "deleted").length,
+	};
+}
 
 export function formatSummary(units: TurnUnit[], state: ManageContextState): string {
 	const lines: string[] = [];
@@ -28,12 +48,7 @@ export function formatSummary(units: TurnUnit[], state: ManageContextState): str
 	lines.push("");
 	lines.push(`Total entries: ${units.length}`);
 
-	const counts = {
-		user: units.filter((u) => u.kind === "user").length,
-		assistant: units.filter((u) => u.kind === "assistant_text").length,
-		tools: units.filter((u) => u.kind === "assistant_tool").length,
-		custom: units.filter((u) => u.kind === "custom_message").length,
-	};
+	const counts = countByKind(units);
 
 	lines.push(`  • User messages: ${counts.user}`);
 	lines.push(`  • Assistant responses: ${counts.assistant}`);
@@ -44,12 +59,7 @@ export function formatSummary(units: TurnUnit[], state: ManageContextState): str
 	const totalTokens = units.reduce((sum, u) => sum + u.tokenEstimate, 0);
 	lines.push(`Total tokens: ~${totalTokens}`);
 
-	const marks = {
-		selected: units.filter((u) => describeMark(u, state).effective === "selected").length,
-		unselected: units.filter((u) => describeMark(u, state).effective === "unselected").length,
-		compressed: units.filter((u) => describeMark(u, state).effective === "compressed").length,
-		deleted: units.filter((u) => describeMark(u, state).effective === "deleted").length,
-	};
+	const marks = countByStatus(units, state);
 
 	lines.push("");
 	lines.push("Selection status:");
@@ -160,18 +170,8 @@ export function formatLLMJSON(units: TurnUnit[], state: ManageContextState): str
 			summary: {
 				totalEntries: units.length,
 				totalTokens: units.reduce((sum, u) => sum + u.tokenEstimate, 0),
-				byType: {
-					user: units.filter((u) => u.kind === "user").length,
-					assistant: units.filter((u) => u.kind === "assistant_text").length,
-					tools: units.filter((u) => u.kind === "assistant_tool").length,
-					custom: units.filter((u) => u.kind === "custom_message").length,
-				},
-				byStatus: {
-					selected: entries.filter((e) => e.status === "selected").length,
-					unselected: entries.filter((e) => e.status === "unselected").length,
-					compressed: entries.filter((e) => e.status === "compressed").length,
-					deleted: entries.filter((e) => e.status === "deleted").length,
-				},
+				byType: countByKind(units),
+				byStatus: countByStatus(units, state),
 			},
 			entries,
 		},
@@ -228,10 +228,7 @@ export function buildViewContextTool(): ToolDefinition<typeof VIEW_CONTEXT_TOOL_
 
 			const entries = ctx.sessionManager.buildContextEntries();
 			const state = loadState(ctx);
-			let units = buildTurnUnits(entries);
-			if (!includeDeleted) {
-				units = units.filter((u) => describeMark(u, state).effective !== "deleted");
-			}
+			const units = includeDeleted ? buildTurnUnits(entries) : visibleTurnUnits(entries, state);
 
 			const { text, details } = buildContextOverview(units, state, params);
 			return { content: [{ type: "text", text }], details };

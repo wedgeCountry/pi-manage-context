@@ -19,6 +19,9 @@ import type { AssistantMessage, ImageContent, TextContent } from "@earendil-work
 import type { SessionEntry, SessionMessageEntry } from "@earendil-works/pi-coding-agent";
 import { estimateTokens, sessionEntryToContextMessages } from "@earendil-works/pi-coding-agent";
 
+import type { ManageContextState } from "./state.ts";
+import { describeMark } from "./mark-status.ts";
+
 export type TurnUnitKind = "user" | "assistant_text" | "assistant_tool" | "custom_message";
 
 /**
@@ -71,6 +74,9 @@ export interface TurnUnit extends TurnUnitGroup {
 	/** Display/LLM metadata (heading, summary, tool calls). */
 	metadata: TurnUnitMetadata;
 }
+
+/** One entry from `TurnUnitMetadata.toolCalls` — the shared shape for display/log formatting. */
+export type ToolCallInfo = NonNullable<TurnUnitMetadata["toolCalls"]>[number];
 
 /** A message entry whose message is specifically an assistant message that made tool calls. */
 export interface AssistantToolCallEntry extends SessionMessageEntry {
@@ -234,8 +240,6 @@ export function buildTurnUnitGroups(entries: SessionEntry[]): TurnUnitGroup[] {
 /** Cheap facts shared by every unit kind: text, heading, token estimate. */
 function baseUnitTexts(group: TurnUnitGroup): { text: string; heading: string } {
 	if (group.kind === "assistant_tool") {
-		const entry = group.anchorEntry;
-		if (!hasToolCalls(entry)) return { text: "", heading: "Tool interactions" };
 		return { text: "", heading: "Tool interactions" };
 	}
 	if (group.kind === "custom_message") {
@@ -257,6 +261,16 @@ function baseUnitTexts(group: TurnUnitGroup): { text: string; heading: string } 
 	return { text, heading: generateHeading(kind, text) };
 }
 
+/**
+ * The result entry for one of a group's tool calls, as preview text — shared
+ * by enrichGroup() (metadata) and the compression renderer, which previously
+ * each re-implemented this lookup. "(no result yet)" when it hasn't landed.
+ */
+export function toolCallResultText(group: TurnUnitGroup, callId: string): string {
+	const result = group.resultEntries.find((r) => r.message.role === "toolResult" && r.message.toolCallId === callId);
+	return result && result.message.role === "toolResult" ? contentToPreviewText(result.message.content) : "(no result yet)";
+}
+
 /** Metadata (heading, summary, tool calls) for one structural group. */
 export function enrichGroup(group: TurnUnitGroup): TurnUnitMetadata {
 	const timestamp = group.anchorEntry.timestamp;
@@ -268,18 +282,12 @@ export function enrichGroup(group: TurnUnitGroup): TurnUnitMetadata {
 				? entry.message.content
 						.filter((c) => c.type === "toolCall")
 						.map((call) => {
-							const result = group.resultEntries.find(
-								(r) => r.message.role === "toolResult" && r.message.toolCallId === call.id,
-							);
 							// Capped like every other text path here (preserveLineBreaks is used
 							// for user/assistant/custom_message summaries below) — an uncapped
 							// tool result (e.g. a large file read) would make this unit's own
 							// listing footprint as big as the context the context tools
 							// exist to shrink.
-							const resultText =
-								result && result.message.role === "toolResult"
-									? preserveLineBreaks(contentToPreviewText(result.message.content))
-									: "(no result yet)";
+							const resultText = preserveLineBreaks(toolCallResultText(group, call.id));
 							return {
 								name: call.name,
 								arguments: extractToolArguments(call.arguments),
@@ -332,4 +340,14 @@ export function buildTurnUnits(entries: SessionEntry[]): TurnUnit[] {
 			metadata,
 		};
 	});
+}
+
+/**
+ * The turn units still visible to the extension — everything not marked
+ * "deleted". This is the single predicate used by the picker, the context
+ * tools, and the export; for "deleted" the effective and raw marks coincide
+ * (see mark-status.ts), so it matches the raw-mark checks it replaces.
+ */
+export function visibleTurnUnits(entries: SessionEntry[], state: ManageContextState): TurnUnit[] {
+	return buildTurnUnits(entries).filter((u) => describeMark(u, state).effective !== "deleted");
 }

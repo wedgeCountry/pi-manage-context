@@ -95,21 +95,3 @@ export function pruneMarks(state: ManageContextState, liveGroupIds: Set<string>)
 export function saveState(pi: ExtensionAPI, state: ManageContextState): void {
 	pi.appendEntry(STATE_CUSTOM_TYPE, state);
 }
-
-/**
- * The single load→mutate→save entry point for extension code: resolves the
- * session entries, prunes dead marks, applies the mutator to the fresh
- * state, and persists the snapshot. Returns the persisted state.
- *
- * Callers that only need the current state (read-only) use loadState().
- */
-export function updateState(
-	pi: ExtensionAPI,
-	ctx: ExtensionContext,
-	mutate: (state: ManageContextState) => void,
-): ManageContextState {
-	const state = loadState(ctx);
-	mutate(state);
-	saveState(pi, state);
-	return state;
-}

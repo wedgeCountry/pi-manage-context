@@ -16,10 +16,10 @@
 
 import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
 
-import type { CONTEXT_SELECT_TOOL_DEFINITION } from "../tool_definitions/context-select.ts";
-import type { CONTEXT_UNSELECT_TOOL_DEFINITION } from "../tool_definitions/context-unselect.ts";
+import { CONTEXT_SELECT_TOOL_DEFINITION } from "../tool_definitions/context-select.ts";
+import { CONTEXT_UNSELECT_TOOL_DEFINITION } from "../tool_definitions/context-unselect.ts";
 import { loadState, saveState, type ManageContextState, type Mark } from "../state.ts";
-import { buildTurnUnits, oneLine, type TurnUnit } from "../turn-units.ts";
+import { visibleTurnUnits, oneLine, type TurnUnit } from "../turn-units.ts";
 import { describeMark } from "../mark-status.ts";
 import { createTool } from "./createTool.ts";
 
@@ -117,7 +117,7 @@ export function buildContextMarkTool(
 		execute: async (params, { ctx }) => {
 			const entries = ctx.sessionManager.buildContextEntries();
 			const state = loadState(ctx);
-			const units = buildTurnUnits(entries).filter((u) => describeMark(u, state).effective !== "deleted");
+			const units = visibleTurnUnits(entries, state);
 
 			const result = runContextMark(units, state, params.groupIds, action, definition.name);
 			if (result.changed) {
@@ -132,4 +132,24 @@ export function buildContextMarkTool(
 			return { content: result.content, details: result.details };
 		},
 	});
+}
+
+/** context-select — mark turn units selected (visible to the model again) by groupId. */
+export function buildContextSelectTool(pi: ExtensionAPI): ToolDefinition<typeof CONTEXT_SELECT_TOOL_DEFINITION.parameters, string[]> {
+	return buildContextMarkTool(pi, CONTEXT_SELECT_TOOL_DEFINITION, "select");
+}
+
+/**
+ * context-unselect — hide turn units from the model's context by groupId.
+ * This is also the ONLY tool given to the context-autoselect subagent, so
+ * autoselect can hide units but never select, compress, or delete them.
+ */
+export function buildContextUnselectTool(pi: ExtensionAPI): ToolDefinition<typeof CONTEXT_UNSELECT_TOOL_DEFINITION.parameters, string[]> {
+	return buildContextMarkTool(pi, CONTEXT_UNSELECT_TOOL_DEFINITION, "unselect");
+}
+
+/** Register both groupId-marking tools. */
+export function registerContextMarkTools(pi: ExtensionAPI): void {
+	pi.registerTool(buildContextSelectTool(pi));
+	pi.registerTool(buildContextUnselectTool(pi));
 }

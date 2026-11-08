@@ -10,12 +10,10 @@ import type { Component, TUI } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 
 import type { Mark } from "./state.ts";
+import { symbolForMark } from "./mark-status.ts";
 import { oneLine } from "./turn-units.ts";
-import type { TurnUnit, TurnUnitMetadata } from "./turn-units.ts";
+import type { ToolCallInfo, TurnUnit } from "./turn-units.ts";
 import type { PickerViewModel } from "./picker/picker-view-model.ts";
-
-/** One entry from `TurnUnitMetadata.toolCalls` — kept local since it's only used for display formatting. */
-type ToolCallInfo = NonNullable<TurnUnitMetadata["toolCalls"]>[number];
 
 export class ManageContextView implements Component {
 	private readonly tui: TUI;
@@ -32,17 +30,22 @@ export class ManageContextView implements Component {
 
 	invalidate(): void {}
 
-	private glyphFor(mark: Mark): string {
+	/** Theme color per mark; the glyph itself comes from mark-status (single definition). */
+	private colorFor(mark: Mark): Parameters<Theme["fg"]>[0] {
 		switch (mark) {
 			case "selected":
-				return this.theme.fg("success", "●");
+				return "success";
 			case "unselected":
-				return this.theme.fg("dim", "○");
+				return "dim";
 			case "compressed":
-				return this.theme.fg("warning", "▤");
+				return "warning";
 			case "deleted":
-				return this.theme.fg("error", "✕");
+				return "error";
 		}
+	}
+
+	private glyphFor(mark: Mark): string {
+		return this.theme.fg(this.colorFor(mark), symbolForMark(mark));
 	}
 
 	/** Short, role-colored tag echoing the chat-transcript styling /tree uses ("user:", "assistant:", …). */

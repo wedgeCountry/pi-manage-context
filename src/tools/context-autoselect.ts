@@ -12,8 +12,7 @@ import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-age
 
 import { CONTEXT_AUTOSELECT_TOOL_DEFINITION } from "../tool_definitions/context-autoselect.ts";
 import { loadState } from "../state.ts";
-import { buildTurnUnits } from "../turn-units.ts";
-import { describeMark } from "../mark-status.ts";
+import { visibleTurnUnits } from "../turn-units.ts";
 import { createTool } from "./createTool.ts";
 import { runAutoSelect, type AutoSelectResult } from "./context-autoselect-engine.ts";
 
@@ -25,7 +24,7 @@ function buildContextAutoselectToolImpl(
 		execute: async (params, { signal, ctx }) => {
 			const entries = ctx.sessionManager.buildContextEntries();
 			const state = loadState(ctx);
-			const units = buildTurnUnits(entries).filter((u) => describeMark(u, state).effective !== "deleted");
+			const units = visibleTurnUnits(entries, state);
 
 			const result = await runAutoSelect(pi, ctx, units, state, params, signal);
 			if (result.details.unselected.length > 0 && !result.details.dryRun) {

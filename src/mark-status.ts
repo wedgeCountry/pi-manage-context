@@ -43,7 +43,7 @@ export function markStatus(state: ManageContextState, groupId: string, tokenEsti
 		effective,
 		raw,
 		info,
-		symbol: symbolFor(effective),
+		symbol: symbolForMark(effective),
 		label: labelFor(effective),
 	};
 }
@@ -52,7 +52,8 @@ export function describeMark(unit: TurnUnit, state: ManageContextState): MarkSta
 	return markStatus(state, unit.groupId, unit.tokenEstimate);
 }
 
-function symbolFor(mark: Mark): string {
+/** The row glyph for a mark — the single glyph definition, shared by every renderer. */
+export function symbolForMark(mark: Mark): string {
 	switch (mark) {
 		case "selected":
 			return "●";

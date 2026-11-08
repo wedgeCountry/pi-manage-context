@@ -51,8 +51,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerCommands } from "./src/commands.ts";
 import { registerHooks } from "./src/hooks.ts";
 import { registerContextAutoselectTool } from "./src/tools/context-autoselect.ts";
-import { registerContextSelectTool } from "./src/tools/context-select.ts";
-import { registerContextUnselectTool } from "./src/tools/context-unselect.ts";
+import { registerContextMarkTools } from "./src/tools/context-mark.ts";
 import { registerViewContextTool } from "./src/tools/view-context.ts";
 
 // Re-exported for the tests in tests/index.test.ts.
@@ -66,8 +65,7 @@ export default function (pi: ExtensionAPI): void {
 	});
 
 	registerHooks(pi);
-	registerContextSelectTool(pi);
-	registerContextUnselectTool(pi);
+	registerContextMarkTools(pi);
 	registerContextAutoselectTool(pi);
 	registerViewContextTool(pi);
 	registerCommands(pi, () => cachedModels);

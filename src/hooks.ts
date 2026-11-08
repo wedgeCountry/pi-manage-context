@@ -21,22 +21,29 @@ import { buildTurnUnitGroups, buildTurnUnits, type TurnUnit } from "./turn-units
 export const SELF_UNSELECT_TOOL_NAMES = new Set(["context-select", "context-unselect", "context-autoselect"]);
 
 /**
- * True if `unit`'s anchor assistant message has exactly one tool call and
- * its id is `toolCallId`. Hiding a unit hides every call bundled into it, so
- * this deliberately refuses to match when the matching call shares its turn
- * with any other tool call (same collateral-damage guard as
- * unitHasMatchingRead below) — callers that auto-hide on a match would
- * otherwise also hide unrelated calls' results just because they happened
- * to land in the same assistant turn.
+ * The unit's single tool call, or null unless the unit is an assistant turn
+ * whose ONLY tool call this is. Hiding a unit hides every call bundled into
+ * it, so callers that auto-hide on a match must refuse to match when the
+ * call shares its turn with any other tool call (same collateral-damage
+ * guard for both matchers below) — otherwise unrelated calls' results would
+ * be hidden too just because they landed in the same assistant turn.
  */
-export function unitHasMatchingToolCallId(unit: TurnUnit, toolCallId: string): boolean {
-	if (unit.kind !== "assistant_tool") return false;
-	if (unit.anchorEntry.type !== "message" || unit.anchorEntry.message.role !== "assistant") return false;
+export function singleToolCallOf(unit: TurnUnit) {
+	if (unit.kind !== "assistant_tool") return null;
+	if (unit.anchorEntry.type !== "message" || unit.anchorEntry.message.role !== "assistant") return null;
 
 	const toolCalls = unit.anchorEntry.message.content.filter((block) => block.type === "toolCall");
-	if (toolCalls.length !== 1) return false;
+	if (toolCalls.length !== 1) return null;
 
-	return toolCalls[0].id === toolCallId;
+	return toolCalls[0];
+}
+
+/**
+ * True if `unit`'s anchor assistant message has exactly one tool call and
+ * its id is `toolCallId` (see singleToolCallOf for the collateral-damage guard).
+ */
+export function unitHasMatchingToolCallId(unit: TurnUnit, toolCallId: string): boolean {
+	return singleToolCallOf(unit)?.id === toolCallId;
 }
 
 /**
@@ -46,13 +53,8 @@ export function unitHasMatchingToolCallId(unit: TurnUnit, toolCallId: string): b
  * a mark applies to the whole turn unit, not to one call within it.
  */
 export function unitHasMatchingRead(unit: TurnUnit, resolvedPath: string, currentToolCallId: string): boolean {
-	if (unit.kind !== "assistant_tool") return false;
-	if (unit.anchorEntry.type !== "message" || unit.anchorEntry.message.role !== "assistant") return false;
-
-	const toolCalls = unit.anchorEntry.message.content.filter((block) => block.type === "toolCall");
-	if (toolCalls.length !== 1) return false;
-
-	const [toolCall] = toolCalls;
+	const toolCall = singleToolCallOf(unit);
+	if (!toolCall) return false;
 	// Pro-forma: the current call's own unit shouldn't exist in
 	// buildContextEntries() yet at this point in the tool_result event, but
 	// never unselect the very call that just produced this result if it does.
