@@ -4,6 +4,7 @@
  *
  * Usage:
  *   /manage_context                      open the picker
+ *   /manage_context auto [focus]         run the context-autoselect subagent right away
  *   /manage_context <provider>/<modelId> set the compression model, then open the picker
  *   /manage_context model                print the currently configured compression model
  *   /export_context [filename.md]        write the summarized context as a markdown file to the current dir

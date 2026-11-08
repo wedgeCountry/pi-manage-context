@@ -17,29 +17,71 @@ import type {
 import { exportUnitsToMarkdown } from "./markdown-export.ts";
 import { loadState, saveState } from "./state.ts";
 import { buildTurnUnits } from "./turn-units.ts";
+import { describeMark } from "./mark-status.ts";
+import { runAutoSelect } from "./tools/context-autoselect-engine.ts";
 import { ManageContextView } from "./view.ts";
 import { PickerViewModel } from "./picker/picker-view-model.ts";
 import { createCompressionService } from "./services/compression-service.ts";
 import { createStateService } from "./services/state-service.ts";
 
+/**
+ * Parse the optional `auto` argument of /manage_context: "auto" or
+ * "auto <focus text>" runs the context-autoselect subagent right away.
+ * Returns null when the args are not an auto invocation.
+ */
+export function parseAutoArgs(args: string): { focus?: string } | null {
+	const trimmed = args.trim();
+	if (trimmed !== "auto" && !trimmed.startsWith("auto ")) return null;
+	const focus = trimmed.slice("auto".length).trim();
+	return focus ? { focus } : {};
+}
+
+/** Run context-autoselect from the /manage_context auto command and report the outcome. */
+async function runAutoSelectCommand(pi: ExtensionAPI, ctx: ExtensionCommandContext, focus: string | undefined): Promise<void> {
+	const entries = ctx.sessionManager.buildContextEntries();
+	const state = loadState(ctx);
+	const units = buildTurnUnits(entries).filter((u) => describeMark(u, state).effective !== "deleted");
+	if (units.length === 0) {
+		ctx.ui.notify("No messages in context yet.", "info");
+		return;
+	}
+
+	ctx.ui.notify("Running context-autoselect subagent…", "info");
+	try {
+		const result = await runAutoSelect(pi, ctx, units, state, { focus }, ctx.signal);
+		ctx.ui.notify(result.content[0].text.split("\n")[0], "info");
+	} catch (error) {
+		ctx.ui.notify(`context-autoselect failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+	}
+}
+
 export function registerCommands(pi: ExtensionAPI, cachedModels: () => Model<Api>[]): void {
 	pi.registerCommand("manage_context", {
-		description: "Review, select, compress, or delete messages from the model's context",
+		description: "Review, select, compress, or delete messages from the model's context; 'auto [focus]' runs the context-autoselect subagent right away",
 		getArgumentCompletions(prefix: string): AutocompleteItem[] | null {
+			const items: AutocompleteItem[] = [];
+			if ("auto".startsWith(prefix)) {
+				items.push({ value: "auto", label: "auto — run the context-autoselect subagent now, optionally with a focus description" });
+			}
 			const models = cachedModels();
-			if (models.length === 0) return null;
-			const items = models.map((m) => ({ value: `${m.provider}/${m.id}`, label: `${m.provider}/${m.id}` }));
+			items.push(...models.map((m) => ({ value: `${m.provider}/${m.id}`, label: `${m.provider}/${m.id}` })));
 			const filtered = items.filter((i) => i.value.startsWith(prefix));
 			return filtered.length > 0 ? filtered : null;
 		},
 		handler: async (args: string, ctx: ExtensionCommandContext) => {
+			const state = loadState(ctx);
+			const trimmed = args.trim();
+
+			const auto = parseAutoArgs(trimmed);
+			if (auto) {
+				await runAutoSelectCommand(pi, ctx, auto.focus);
+				return;
+			}
+
 			if (!ctx.hasUI) {
 				ctx.ui.notify("manage_context requires an interactive terminal", "warning");
 				return;
 			}
-
-			const state = loadState(ctx);
-			const trimmed = args.trim();
 
 			if (trimmed === "model") {
 				const current = state.compressionModel
