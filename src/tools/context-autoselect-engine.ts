@@ -21,13 +21,12 @@
  */
 
 import type { Model } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { AgentSession, ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
 	createAgentSession,
 	DefaultResourceLoader,
 	getAgentDir,
 	SessionManager,
-	type ResourceLoader,
 } from "@earendil-works/pi-coding-agent";
 
 import { CONTEXT_UNSELECT_TOOL_DEFINITION, type ContextUnselectParams } from "../tool_definitions/context-unselect.ts";
@@ -106,43 +105,101 @@ export function summarizeAutoResult(details: { unselected: string[]; dryRun: boo
 	return lines.join("\n");
 }
 
-/** Minimal structural shape of the child agent session runAutoSelect needs. */
-export interface AutoSelectChildSession {
-	prompt(task: string): Promise<void>;
-	abort(): void;
-	dispose(): void;
-	subscribe(listener: (event: { type: string; message?: { role?: string } }) => void): () => void;
-}
+/**
+ * The part of a real AgentSession the engine needs. Typed against the real SDK
+ * type (not a structural duck type) so the turn-cap check below is
+ * compile-time safe and can't silently stop matching if event shapes drift.
+ */
+export type AutoSelectChildSession = Pick<AgentSession, "prompt" | "abort" | "dispose" | "subscribe">;
 
 export interface AutoSelectChildOptions {
 	model: Model<any> | undefined;
 	customTools: ToolDefinition[];
 	sessionManager: SessionManager;
-	resourceLoader: ResourceLoader;
+	cwd: string;
 }
 
-/** Injectable so tests can substitute a fake child session. */
+/** Injectable so tests can substitute a fake child session (and do zero real I/O). */
 export type AutoSelectSessionFactory = (options: AutoSelectChildOptions) => Promise<AutoSelectChildSession>;
 
 /** The real child session: in-process, inheriting the parent's model, with context-unselect as its only tool. */
 export const defaultAutoSelectSessionFactory: AutoSelectSessionFactory = async (options) => {
+	// The resource loader is built HERE, inside the factory seam, so a fake
+	// factory in tests never touches the real ~/.pi/agent directory.
+	const resourceLoader = new DefaultResourceLoader({
+		cwd: options.cwd,
+		agentDir: getAgentDir(),
+		noExtensions: true,
+		noSkills: true,
+		noContextFiles: true,
+	});
+	await resourceLoader.reload();
 	const { session } = await createAgentSession({
 		model: options.model,
 		customTools: options.customTools,
 		sessionManager: options.sessionManager,
-		resourceLoader: options.resourceLoader,
+		resourceLoader,
 		noTools: "all",
 	});
 	return session;
 };
 
 /** Cap on child turns so a looping model can't spin forever. */
-const MAX_CHILD_TURNS = 5;
+export const MAX_CHILD_TURNS = 5;
 
 /**
- * Adapter: run the autoselect subagent against the parent's turn units and
- * state. Under dryRun the child's context-unselect calls are recorded but
- * never persisted (saveState is skipped).
+ * The child's only tool: the real context-unselect definition whose execute
+ * closes over the PARENT's pi and state. runContextMark already rejects
+ * unknown groupIds, so the subagent can't invent ids.
+ */
+export function buildChildUnselectTool(
+	pi: ExtensionAPI,
+	_ctx: ExtensionContext,
+	units: TurnUnit[],
+	state: ManageContextState,
+	dryRun: boolean,
+	unselected: string[],
+): ToolDefinition<typeof CONTEXT_UNSELECT_TOOL_DEFINITION.parameters, unknown> {
+	return {
+		...CONTEXT_UNSELECT_TOOL_DEFINITION,
+		async execute(_toolCallId, childParams: ContextUnselectParams) {
+			const result = runContextMark(units, state, childParams.groupIds, "unselect", CONTEXT_UNSELECT_TOOL_DEFINITION.name);
+			if (result.changed) {
+				unselected.push(...result.details);
+				if (!dryRun) saveState(pi, state);
+			}
+			return { content: result.content, details: result.details };
+		},
+	};
+}
+
+/** Run the child session: prompt it, cap its turns, propagate the parent's abort signal, always dispose. */
+async function runChildSession(session: AutoSelectChildSession, task: string, signal: AbortSignal | undefined): Promise<void> {
+	let assistantTurns = 0;
+	const unsubscribe = session.subscribe((event) => {
+		if (event.type === "message_end" && event.message.role === "assistant") {
+			assistantTurns += 1;
+			if (assistantTurns >= MAX_CHILD_TURNS) session.abort();
+		}
+	});
+	const onAbort = () => session.abort();
+	if (signal) {
+		if (signal.aborted) onAbort();
+		else signal.addEventListener("abort", onAbort, { once: true });
+	}
+	try {
+		await session.prompt(task);
+	} finally {
+		if (signal) signal.removeEventListener("abort", onAbort);
+		unsubscribe();
+		session.dispose();
+	}
+}
+
+/**
+ * Orchestration: build the listing, spawn the child subagent via the
+ * (injectable) session factory, run it, and summarize the outcome. Under
+ * dryRun the child's context-unselect calls are recorded but never persisted.
  */
 export async function runAutoSelect(
 	pi: ExtensionAPI,
@@ -163,58 +220,14 @@ export async function runAutoSelect(
 		};
 	}
 
-	// The child's only tool: the real context-unselect definition whose
-	// execute closes over the PARENT's pi and state. runContextMark already
-	// rejects unknown groupIds, so the subagent can't invent ids.
 	const unselected: string[] = [];
-	const childContextUnselect: ToolDefinition<typeof CONTEXT_UNSELECT_TOOL_DEFINITION.parameters, unknown> = {
-		...CONTEXT_UNSELECT_TOOL_DEFINITION,
-		async execute(_toolCallId, childParams: ContextUnselectParams) {
-			const result = runContextMark(units, state, childParams.groupIds, "unselect", CONTEXT_UNSELECT_TOOL_DEFINITION.name);
-			if (result.changed) {
-				unselected.push(...result.details);
-				if (!dryRun) saveState(pi, state);
-			}
-			return { content: result.content, details: result.details };
-		},
-	};
-
-	const resourceLoader = new DefaultResourceLoader({
-		cwd: ctx.cwd,
-		agentDir: getAgentDir(),
-		noExtensions: true,
-		noSkills: true,
-		noContextFiles: true,
-	});
-	await resourceLoader.reload();
-
 	const session = await sessionFactory({
 		model: ctx.model,
-		customTools: [childContextUnselect],
+		customTools: [buildChildUnselectTool(pi, ctx, units, state, dryRun, unselected)],
 		sessionManager: SessionManager.inMemory(),
-		resourceLoader,
+		cwd: ctx.cwd,
 	});
-
-	let assistantTurns = 0;
-	const unsubscribe = session.subscribe((event) => {
-		if (event.type === "message_end" && event.message?.role === "assistant") {
-			assistantTurns += 1;
-			if (assistantTurns >= MAX_CHILD_TURNS) session.abort();
-		}
-	});
-	const onAbort = () => session.abort();
-	if (signal) {
-		if (signal.aborted) onAbort();
-		else signal.addEventListener("abort", onAbort, { once: true });
-	}
-
-	try {
-		await session.prompt(buildAutoSelectTask(listing, params.focus));
-	} finally {
-		if (signal) signal.removeEventListener("abort", onAbort);
-		unsubscribe();
-		session.dispose();
-	}
+	await runChildSession(session, buildAutoSelectTask(listing, params.focus), signal);
 
 	const details = { unselected, dryRun };
 	return { content: [{ type: "text", text: summarizeAutoResult(details) }], details };

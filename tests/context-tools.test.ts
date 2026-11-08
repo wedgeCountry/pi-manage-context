@@ -213,6 +213,10 @@ describe("context-autoselect", () => {
 		const captured = getCaptured()!;
 		expect(captured.customTools).toHaveLength(1);
 		expect(captured.customTools[0].name).toBe("context-unselect");
+		// The resource loader is built inside the default factory only, so a
+		// fake factory never performs real filesystem I/O.
+		expect(captured).not.toHaveProperty("resourceLoader");
+		expect(captured.cwd).toBe(process.cwd());
 		expect(getTask()).toContain("fixing the login bug");
 		expect(getTask()).toContain('"groupId": "e1"');
 
