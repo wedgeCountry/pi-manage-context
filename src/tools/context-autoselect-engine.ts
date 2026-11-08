@@ -35,6 +35,11 @@ import { oneLine, preserveLineBreaks, type TurnUnit } from "../turn-units.ts";
 import { describeMark } from "../mark-status.ts";
 import { runContextMark } from "./context-mark.ts";
 
+/** Cap for the one-line heading in the autoselect listing. */
+export const AUTO_LISTING_HEADING_MAX = 80;
+/** Cap for the (line-break-preserving) summary in the autoselect listing. */
+export const AUTO_LISTING_SUMMARY_MAX = 1000;
+
 /** One compact row of the listing offered to the subagent. */
 export interface AutoListingRow {
 	groupId: string;
@@ -69,10 +74,10 @@ export function buildAutoListing(units: TurnUnit[], state: ManageContextState): 
 		.filter((_, index) => index !== lastUserIndex)
 		.map((unit) => ({
 			groupId: unit.groupId,
-			heading: oneLine(unit.metadata.heading, 80),
+			heading: oneLine(unit.metadata.heading, AUTO_LISTING_HEADING_MAX),
 			type: unit.metadata.type,
 			tokenEstimate: unit.tokenEstimate,
-			summary: preserveLineBreaks(unit.metadata.summary, 1000),
+			summary: preserveLineBreaks(unit.metadata.summary, AUTO_LISTING_SUMMARY_MAX),
 			mark: describeMark(unit, state).effective,
 		}));
 }

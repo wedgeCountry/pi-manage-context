@@ -22,6 +22,9 @@ import { loadState, saveState, type ManageContextState, type Mark } from "../sta
 import { buildTurnUnits, oneLine, type TurnUnit } from "../turn-units.ts";
 import { describeMark } from "../mark-status.ts";
 
+/** Cap for the one-line heading shown in the per-unit preview. */
+export const PREVIEW_HEADING_MAX = 80;
+
 export interface ContextMarkResult {
 	content: [{ type: "text"; text: string }];
 	/** groupIds whose mark was written. */
@@ -59,7 +62,7 @@ export function runContextMark(
 	// Preview what the match hits before (and while) changing it.
 	const previews = matched.map((unit) => ({
 		id: unit.groupId,
-		heading: oneLine(unit.metadata.heading, 80),
+		heading: oneLine(unit.metadata.heading, PREVIEW_HEADING_MAX),
 		was: describeMark(unit, state).effective,
 	}));
 
