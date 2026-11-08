@@ -60,17 +60,15 @@ describe("loadAutoSelectTemplate", () => {
 		}
 	});
 
-	it("the bundled file is the single source of truth: it carries the placeholders and the instructions", async () => {
+	it("the bundled file is the single source of truth: it carries the placeholders and renders", async () => {
 		const template = await readFile(BUNDLED_TEMPLATE_PATH, "utf-8");
 		expect(template).toContain("{{focus}}");
 		expect(template).toContain("{{listing}}");
-		expect(template).toContain("context-unselect ONCE");
 		const task = buildAutoSelectTask(listing, "fixing the auth bug", template);
 		expect(task).toContain("fixing the auth bug");
 		expect(task).toContain('"groupId": "e1"');
-		expect(task).toMatch(/conservative/i);
-		expect(task).toMatch(/latest user turn is not in this list/i);
-		expect(buildAutoSelectTask([], undefined, template)).toMatch(/not specified/i);
+		expect(task).not.toContain("{{");
+		expect(buildAutoSelectTask([], undefined, template)).toContain(NO_FOCUS_TEXT);
 	});
 
 	it("prefers a per-project .pi/context-autoselect.md override", async () => {

@@ -10,7 +10,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { userEntry, assistantTextEntry, makeHarness } from "./helpers.ts";
-import { makeMarkToolDefinition } from "../src/tool_definitions/context-mark.ts";
+import { CONTEXT_SELECT_TOOL_DEFINITION } from "../src/tool_definitions/context-select.ts";
+import { CONTEXT_UNSELECT_TOOL_DEFINITION } from "../src/tool_definitions/context-unselect.ts";
 
 import { buildContextSelectTool, buildContextUnselectTool } from "../src/tools/context-mark.ts";
 import { buildContextAutoselectTool } from "../src/tools/context-autoselect.ts";
@@ -238,16 +239,13 @@ describe("context-autoselect", () => {
 	});
 });
 
-describe("makeMarkToolDefinition", () => {
-	it("builds the select/unselect pair from one factory, differing only in name and copy", () => {
-		const select = makeMarkToolDefinition("select");
-		const unselect = makeMarkToolDefinition("unselect");
-
-		expect(select.name).toBe("context-select");
-		expect(unselect.name).toBe("context-unselect");
-		expect(select.executionMode).toBe("sequential");
-		expect(unselect.executionMode).toBe("sequential");
-		expect(Object.keys(select.parameters.properties)).toEqual(["groupIds"]);
-		expect(Object.keys(unselect.parameters.properties)).toEqual(["groupIds"]);
+describe("context-select / context-unselect definitions", () => {
+	it("are explicit per-tool definitions in their own files, differing only in name and copy", () => {
+		expect(CONTEXT_SELECT_TOOL_DEFINITION.name).toBe("context-select");
+		expect(CONTEXT_UNSELECT_TOOL_DEFINITION.name).toBe("context-unselect");
+		expect(CONTEXT_SELECT_TOOL_DEFINITION.executionMode).toBe("sequential");
+		expect(CONTEXT_UNSELECT_TOOL_DEFINITION.executionMode).toBe("sequential");
+		expect(Object.keys(CONTEXT_SELECT_TOOL_DEFINITION.parameters.properties)).toEqual(["groupIds"]);
+		expect(Object.keys(CONTEXT_UNSELECT_TOOL_DEFINITION.parameters.properties)).toEqual(["groupIds"]);
 	});
 });
