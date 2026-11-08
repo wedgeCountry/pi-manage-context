@@ -23,9 +23,7 @@ export const VIEW_CONTEXT_TOOL_DEFINITION = {
 	name: "view_context",
 	label: "View context overview",
 	description:
-		"Create a readable overview of your conversation context, similar to what the user sees in the /manage_context picker. " +
-		"Shows all turn units with their metadata, token counts, and current selection status. " +
+		"Create a readable overview of your conversation context. " +
 		"Use this to understand what's in your context before deciding what to compress or unselect.",
-	promptSnippet: "view_context — get a readable overview of your conversation context",
 	parameters: VIEW_CONTEXT_PARAMETERS,
 };
