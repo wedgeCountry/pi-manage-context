@@ -65,17 +65,24 @@ export function runContextMark(
 
 	const affected: string[] = [];
 	for (const unit of matched) {
+		// Skip no-op writes: a unit already at the target mark isn't rewritten
+		// (which would persist a fresh snapshot and notify for nothing).
+		const current = state.marks[unit.groupId]?.mark ?? "selected";
+		if (current === targetMark) continue;
 		const existing = state.marks[unit.groupId];
 		state.marks[unit.groupId] = { ...existing, mark: targetMark };
 		affected.push(unit.groupId);
 	}
 
 	const lines: string[] = [];
-	if (affected.length === 0) {
+	if (matched.length === 0) {
 		lines.push("No turn units matched — nothing changed.");
+	} else if (affected.length === 0) {
+		lines.push(`All ${matched.length} matched unit(s) were already ${targetMark} — nothing changed.`);
 	} else {
 		lines.push(`Marked ${affected.length} unit(s) as ${targetMark}:`);
 		for (const preview of previews) {
+			if (!affected.includes(preview.id)) continue;
 			lines.push(`  ${preview.id}  ${preview.heading}  (was: ${preview.was})`);
 		}
 	}

@@ -30,16 +30,28 @@ function makeUnit(groupId: string, heading: string, opts: Partial<TurnUnit> = {}
 }
 
 describe("runContextMark", () => {
-	it("selects units by groupId only and reports changed:true with the affected ids", () => {
+	it("unselects units by groupId only and reports changed:true with the affected ids", () => {
 		const units = [makeUnit("e1", "Draft implementation"), makeUnit("e2", "Final implementation")];
+		const state = emptyState();
+
+		const result = runContextMark(units, state, ["e1"], "unselect", "context-unselect");
+
+		expect(result.changed).toBe(true);
+		expect(result.details).toEqual(["e1"]);
+		expect(state.marks.e1?.mark).toBe("unselected");
+		expect(state.marks.e2).toBeUndefined();
+	});
+
+	it("treats re-applying the current mark as a no-op: changed:false, nothing written", () => {
+		const units = [makeUnit("e1", "hi there")];
 		const state = emptyState();
 
 		const result = runContextMark(units, state, ["e1"], "select", "context-select");
 
-		expect(result.changed).toBe(true);
-		expect(result.details).toEqual(["e1"]);
-		expect(state.marks.e1?.mark).toBe("selected");
-		expect(state.marks.e2).toBeUndefined();
+		expect(result.changed).toBe(false);
+		expect(result.details).toEqual([]);
+		expect(result.content[0].text).toMatch(/already selected/i);
+		expect(state.marks.e1).toBeUndefined(); // no snapshot-worthy write
 	});
 
 	it("unselects units by groupId, preserving other mark fields (e.g. compressedText)", () => {
@@ -92,9 +104,10 @@ describe("runContextMark", () => {
 		expect(result.content[0].text).toMatch(/not matched/i);
 	});
 
-	it("previews each matched unit (id, heading, previous mark) in the output before mutating", () => {
+	it("previews each changed unit (id, heading, previous mark) in the output before mutating", () => {
 		const units = [makeUnit("e1", "Draft implementation"), makeUnit("e2", "Final implementation")];
 		const state = emptyState();
+		state.marks.e1 = { mark: "unselected" };
 		state.marks.e2 = { mark: "unselected" };
 
 		const result = runContextMark(units, state, ["e1", "e2"], "select", "context-select");
@@ -103,11 +116,26 @@ describe("runContextMark", () => {
 		expect(text).toContain("Marked 2 unit(s) as selected:");
 		expect(text).toContain("e1");
 		expect(text).toContain("Draft implementation");
-		expect(text).toContain("(was: selected)");
-		expect(text).toContain("e2");
 		expect(text).toContain("(was: unselected)");
+		expect(text).toContain("e2");
 		expect(state.marks.e1?.mark).toBe("selected");
 		expect(state.marks.e2?.mark).toBe("selected");
+	});
+
+	it("lists only units whose mark actually changed, not matched-but-already-at-target ones", () => {
+		const units = [makeUnit("e1", "Draft implementation"), makeUnit("e2", "Final implementation")];
+		const state = emptyState();
+		state.marks.e2 = { mark: "unselected" }; // already at target for unselect
+
+		const result = runContextMark(units, state, ["e1", "e2"], "unselect", "context-unselect");
+
+		const text = result.content[0].text;
+		expect(text).toContain("Marked 1 unit(s) as unselected:");
+		expect(text).toContain("e1");
+		expect(text).toContain("(was: selected)");
+		expect(text).not.toContain("e2");
+		expect(result.details).toEqual(["e1"]);
+		expect(state.marks.e2?.mark).toBe("unselected"); // untouched
 	});
 
 	it("names the calling tool in the empty-array no-op message", () => {
