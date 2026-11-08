@@ -63,7 +63,6 @@ Tests for the `view_context` tool covering:
 - **Detailed format**: Tests full metadata output
 - **LLM-JSON format**: Tests structured JSON output and parsing
 - **Deleted entry filtering**: Verifies deleted entries are excluded by default
-- **Include deleted option**: Tests `includeDeleted=true` parameter
 - **Retention analysis**: Tests `showRetention=true` in detailed format
 - **Entry type counting**: Verifies correct counts by type (user/assistant/tool/custom)
 - **Token count display**: Verifies token totals are shown
@@ -82,9 +81,6 @@ view_context({ format: "detailed" }) → Shows full metadata per entry
 
 // JSON format
 view_context({ format: "llm-json" }) → Returns parseable JSON
-
-// With deleted entries
-view_context({ includeDeleted: true }) → Shows all entries including deleted
 
 // With retention analysis
 view_context({ format: "detailed", showRetention: true }) → Shows retention reasons
@@ -196,7 +192,6 @@ npm test -- --watch
 - [x] Detailed format output
 - [x] LLM-JSON format output
 - [x] Deleted entry filtering
-- [x] includeDeleted parameter
 - [x] showRetention parameter
 - [x] Entry type counting
 - [x] Token count display
