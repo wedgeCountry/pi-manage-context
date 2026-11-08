@@ -15,7 +15,7 @@ pi install --global git:github.com/wedgeCountry/pi-manage-context.git # global
 | Command | Description |
 |---|---|
 | `/manage_context` (alias `/mc`) | Open the interactive picker |
-| `/manage_context auto [focus]` (alias `/mc auto [focus]`) | Run the `context-autoselect` subagent right away (no picker), optionally with a focus description; unselected units are hidden on the next model turn |
+| `/manage_context auto [focus]` (alias `/mc auto [focus]`) | Run the `context-autoselect` subagent right away (no picker), optionally with a focus description; a spinner in the footer status shows progress while it runs; unselected units are hidden on the next model turn |
 | `/manage_context <provider>/<modelId>` | Set the compression model, then open the picker |
 | `/manage_context model` | Print the configured compression model |
 | `/export_context [filename.md]` | Export the summarized context as markdown (timestamped name if omitted) |
