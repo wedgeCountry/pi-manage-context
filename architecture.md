@@ -31,7 +31,12 @@ A realized compression stores `compressedText` and resets the raw mark to
 `selected`; the *effective* status still reads as `compressed`. Every surface
 (picker, both tools, filter) must report through `markStatus()` /
 `describeMark()` (`src/mark-status.ts`) — the single source of truth — never
-by re-deriving it.
+by re-deriving it. Row glyphs likewise come from the one exported
+`symbolForMark()`; renderers only add theme color.
+
+Surfaces that list "what's still in context" (picker, context tools, export)
+all go through `visibleTurnUnits()` (`src/turn-units.ts`) — the single
+"not deleted" predicate built on `describeMark()`.
 
 ## Layering
 
@@ -47,10 +52,13 @@ by re-deriving it.
   onUpdate, ctx)` into a 2-arg hook, so no tool repeats framework plumbing.
   Each `src/tools/<tool>.ts` keeps a plain, `ExtensionContext`-free function
   (unit-tested directly) plus a thin `buildXTool(pi)` / `registerXTool(pi)`.
-  The context-marking tools are `context-select` / `context-unselect` (one
-  shared adapter over the pure `runContextMark()` in
-  `src/tools/context-mark.ts`) and `context-autoselect` (adapter over
-  `runAutoSelect()` in `src/tools/context-autoselect-engine.ts`).
+  The context-marking tools are `context-select` / `context-unselect` — one
+  shared adapter (`buildContextMarkTool()` over the pure `runContextMark()`)
+  and one shared definition factory (`makeMarkToolDefinition()` in
+  `src/tool_definitions/context-mark.ts`, registered via
+  `registerContextMarkTools(pi)`), both in `src/tools/context-mark.ts` —
+  plus `context-autoselect` (adapter over `runAutoSelect()` in
+  `src/tools/context-autoselect-engine.ts`).
 - The picker is MVVM: `src/picker/picker-view-model.ts` owns all state and
   behavior (phase machine, key dispatch, compression orchestration) with no
   TUI imports and `handleInput()` returning `"render" | "close"`;
@@ -105,4 +113,6 @@ by re-deriving it.
 `npm test` runs offline. Plain-function tests (`tests/*-plain.test.ts`,
 `tests/picker-view-model.test.ts`) call domain functions directly with
 hand-built fixtures; integration tests drive tools via mocked
-`ExtensionContext`. Provider-dependent tests auto-skip without API keys.
+`ExtensionContext`. Shared session-entry factories and the in-memory pi
+stand-in live in `tests/helpers.ts`. Provider-dependent tests auto-skip
+without API keys.

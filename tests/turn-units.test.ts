@@ -1,51 +1,8 @@
-import type { SessionEntry, SessionMessageEntry } from "@earendil-works/pi-coding-agent";
-import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
+import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
-import { buildTurnUnits } from "../src/turn-units.ts";
-
-const usage: Usage = {
-  input: 0,
-  output: 0,
-  cacheRead: 0,
-  cacheWrite: 0,
-  totalTokens: 0,
-  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-};
-
-function toolCallEntry(entryId: string, toolCallId: string, toolName: string): SessionMessageEntry {
-  const message: AssistantMessage = {
-    role: "assistant",
-    content: [{ type: "toolCall", id: toolCallId, name: toolName, arguments: {} }],
-    api: "test",
-    provider: "test",
-    model: "test",
-    usage,
-    stopReason: "toolUse",
-    timestamp: 0,
-  };
-  return { type: "message", id: entryId, parentId: null, timestamp: "0", message };
-}
-
-function toolResultEntry(entryId: string, toolCallId: string, text = ""): SessionMessageEntry {
-  return {
-    type: "message",
-    id: entryId,
-    parentId: null,
-    timestamp: "0",
-    message: {
-      role: "toolResult",
-      toolCallId,
-      toolName: "context-unselect",
-      content: [{ type: "text", text }],
-      isError: false,
-      timestamp: 0,
-    },
-  };
-}
-
-function customEntry(entryId: string): SessionEntry {
-  return { type: "custom", id: entryId, parentId: null, timestamp: "0", customType: "manage-context", data: {} } as SessionEntry;
-}
+import { buildTurnUnits, visibleTurnUnits, toolCallResultText } from "../src/turn-units.ts";
+import { emptyState } from "../src/state.ts";
+import { userEntry, assistantTextEntry, toolCallEntry, toolResultEntry, customEntry } from "./helpers.ts";
 
 describe("buildTurnUnits", () => {
   it("groups a tool call with its result when they're strictly adjacent", () => {
@@ -120,5 +77,33 @@ describe("buildTurnUnits", () => {
 
     expect(result.length).toBeLessThan(HUGE.length);
     expect(result.length).toBeLessThanOrEqual(4000);
+  });
+});
+
+describe("visibleTurnUnits", () => {
+  it("excludes deleted units but keeps everything else", () => {
+    const entries = [userEntry("e1", "keep me"), userEntry("e2", "delete me"), assistantTextEntry("e3", "hi")];
+    const state = emptyState();
+    state.marks = { e2: { mark: "deleted" } };
+
+    expect(visibleTurnUnits(entries, state).map((u) => u.groupId)).toEqual(["e1", "e3"]);
+  });
+
+  it("keeps realized compressions visible (effective compressed, raw selected)", () => {
+    const entries = [userEntry("e1", "compress me")];
+    const state = emptyState();
+    state.marks = { e1: { mark: "selected", compressedText: "summary" } };
+
+    expect(visibleTurnUnits(entries, state).map((u) => u.groupId)).toEqual(["e1"]);
+  });
+});
+
+describe("toolCallResultText", () => {
+  it("returns the matching result's preview text, or a placeholder when absent", () => {
+    const entries = [toolCallEntry("call_entry", "call_1", "read"), toolResultEntry("result_entry", "call_1", "file contents")];
+    const [unit] = buildTurnUnits(entries);
+
+    expect(toolCallResultText(unit, "call_1")).toBe("file contents");
+    expect(toolCallResultText(unit, "missing")).toBe("(no result yet)");
   });
 });

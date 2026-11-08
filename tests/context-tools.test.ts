@@ -8,69 +8,15 @@
  * lands in the PARENT session's state.
  */
 import { describe, expect, it, vi } from "vitest";
-import type { ExtensionAPI, ExtensionContext, SessionEntry, SessionMessageEntry } from "@earendil-works/pi-coding-agent";
-import type { UserMessage, AssistantMessage } from "@earendil-works/pi-ai";
+import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+import { userEntry, assistantTextEntry, makeHarness } from "./helpers.ts";
+import { makeMarkToolDefinition } from "../src/tool_definitions/context-mark.ts";
 
-import { buildContextSelectTool } from "../src/tools/context-select.ts";
-import { buildContextUnselectTool } from "../src/tools/context-unselect.ts";
+import { buildContextSelectTool, buildContextUnselectTool } from "../src/tools/context-mark.ts";
 import { buildContextAutoselectTool } from "../src/tools/context-autoselect.ts";
 import { runAutoSelect, type AutoSelectChildOptions, type AutoSelectSessionFactory } from "../src/tools/context-autoselect-engine.ts";
 import { loadState } from "../src/state.ts";
 import { buildTurnUnits } from "../src/turn-units.ts";
-
-function userEntry(id: string, text: string): SessionMessageEntry {
-	const message: UserMessage = { role: "user", content: text, timestamp: 0 };
-	return { type: "message", id, parentId: null, timestamp: "0", message };
-}
-
-function assistantTextEntry(id: string, text: string): SessionMessageEntry {
-	const message: AssistantMessage = {
-		role: "assistant",
-		content: [{ type: "text", text }],
-		api: "test",
-		provider: "test",
-		model: "test",
-		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
-		stopReason: "stop",
-		timestamp: 0,
-	};
-	return { type: "message", id, parentId: null, timestamp: "0", message };
-}
-
-/**
- * Minimal in-memory stand-in for the real pi runtime: appendEntry() pushes a
- * "custom" entry onto the same entries array getEntries()/buildContextEntries()
- * read from, so loadState()/saveState() round-trip exactly like they do for
- * the interactive picker in view.ts.
- */
-function makeHarness(entries: SessionEntry[]): { pi: ExtensionAPI; ctx: ExtensionContext; notifies: string[] } {
-	let nextId = 0;
-	const notifies: string[] = [];
-	const pi = {
-		appendEntry: (customType: string, data: unknown) => {
-			entries.push({
-				type: "custom",
-				id: `custom_${nextId++}`,
-				parentId: null,
-				timestamp: "0",
-				customType,
-				data,
-			} as SessionEntry);
-		},
-	} as unknown as ExtensionAPI;
-
-	const ctx = {
-		cwd: process.cwd(),
-		model: undefined,
-		sessionManager: {
-			getEntries: () => entries,
-			buildContextEntries: () => entries,
-		},
-		ui: { notify: (msg: string) => notifies.push(msg) },
-	} as unknown as ExtensionContext;
-
-	return { pi, ctx, notifies };
-}
 
 describe("context-select / context-unselect tools", () => {
 	it("expose the expected names and a required groupIds string-array parameter", () => {
@@ -289,5 +235,19 @@ describe("context-autoselect", () => {
 		await runAutoSelect(pi, ctx, units, state, {}, controller.signal, factory);
 
 		expect(abort).toHaveBeenCalled();
+	});
+});
+
+describe("makeMarkToolDefinition", () => {
+	it("builds the select/unselect pair from one factory, differing only in name and copy", () => {
+		const select = makeMarkToolDefinition("select");
+		const unselect = makeMarkToolDefinition("unselect");
+
+		expect(select.name).toBe("context-select");
+		expect(unselect.name).toBe("context-unselect");
+		expect(select.executionMode).toBe("sequential");
+		expect(unselect.executionMode).toBe("sequential");
+		expect(Object.keys(select.parameters.properties)).toEqual(["groupIds"]);
+		expect(Object.keys(unselect.parameters.properties)).toEqual(["groupIds"]);
 	});
 });
