@@ -12,7 +12,7 @@ import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-age
 import { CONTEXT_UNSELECT_PARAMETERS, CONTEXT_UNSELECT_TOOL_DEFINITION } from "../tool_definitions/context-unselect.ts";
 import { buildContextMarkTool } from "./context-mark.ts";
 
-export function buildContextUnselectTool(pi: ExtensionAPI): ToolDefinition<typeof CONTEXT_UNSELECT_PARAMETERS, unknown> {
+export function buildContextUnselectTool(pi: ExtensionAPI): ToolDefinition<typeof CONTEXT_UNSELECT_PARAMETERS, string[]> {
 	return buildContextMarkTool(pi, CONTEXT_UNSELECT_TOOL_DEFINITION, "unselect");
 }
 

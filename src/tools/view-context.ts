@@ -10,13 +10,14 @@
  * inspection and awareness of the current context state.
  */
 
-import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 import { VIEW_CONTEXT_TOOL_DEFINITION, type ViewContextParams } from "../tool_definitions/view-context.ts";
 import { loadState, type ManageContextState } from "../state.ts";
 import { buildTurnUnits, type TurnUnit } from "../turn-units.ts";
 import { toLLMMemoryEntry } from "../llm-export.ts";
 import { describeMark } from "../mark-status.ts";
+import { createTool } from "./createTool.ts";
 
 export function formatSummary(units: TurnUnit[], state: ManageContextState): string {
 	const lines: string[] = [];
@@ -220,10 +221,9 @@ export function buildContextOverview(units: TurnUnit[], state: ManageContextStat
 	};
 }
 
-export function buildViewContextTool(): ToolDefinition<typeof VIEW_CONTEXT_TOOL_DEFINITION.parameters, unknown> {
-	return {
-		...VIEW_CONTEXT_TOOL_DEFINITION,
-		async execute(_toolCallId, params: ViewContextParams, _signal, _onUpdate, ctx: ExtensionContext) {
+export function buildViewContextTool(): ToolDefinition<typeof VIEW_CONTEXT_TOOL_DEFINITION.parameters, ViewContextResult["details"]> {
+	return createTool(VIEW_CONTEXT_TOOL_DEFINITION, {
+		execute: (params: ViewContextParams, { ctx }) => {
 			const includeDeleted = params.includeDeleted ?? false;
 
 			const entries = ctx.sessionManager.buildContextEntries();
@@ -236,7 +236,7 @@ export function buildViewContextTool(): ToolDefinition<typeof VIEW_CONTEXT_TOOL_
 			const { text, details } = buildContextOverview(units, state, params);
 			return { content: [{ type: "text", text }], details };
 		},
-	};
+	});
 }
 
 export function registerViewContextTool(pi: ExtensionAPI): void {

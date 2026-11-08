@@ -11,7 +11,7 @@ import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-age
 import { CONTEXT_SELECT_PARAMETERS, CONTEXT_SELECT_TOOL_DEFINITION } from "../tool_definitions/context-select.ts";
 import { buildContextMarkTool } from "./context-mark.ts";
 
-export function buildContextSelectTool(pi: ExtensionAPI): ToolDefinition<typeof CONTEXT_SELECT_PARAMETERS, unknown> {
+export function buildContextSelectTool(pi: ExtensionAPI): ToolDefinition<typeof CONTEXT_SELECT_PARAMETERS, string[]> {
 	return buildContextMarkTool(pi, CONTEXT_SELECT_TOOL_DEFINITION, "select");
 }
 

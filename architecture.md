@@ -39,13 +39,17 @@ by re-deriving it.
 - `src/hooks.ts` — session event handlers (`context`, two `tool_result`
   auto-unselect hooks) and the pure unit matchers.
 - `src/commands.ts` — the three slash commands.
-- Tools follow a fixed split: `src/tool_definitions/<tool>.ts` (pure data:
-  name, description, typebox schema) and `src/tools/<tool>.ts` (a plain,
-  `ExtensionContext`-free function that is unit-tested directly, plus a thin
-  `buildXTool(pi)` / `registerXTool(pi)` adapter that owns all framework
-  plumbing). The context-marking tools are `context-select` /
-  `context-unselect` (thin adapters over the shared pure `runContextMark()`
-  in `src/tools/context-mark.ts`) and `context-autoselect` (adapter over
+- Tools follow the pi-small-models pattern: `src/tool_definitions/<tool>.ts`
+  holds the pure static definition (name, label, description, typebox
+  schema), and `src/tools/createTool.ts` provides the shared factory —
+  `createTool(definition, { execute(params, { signal, ctx }) })` spreads the
+  definition and adapts pi's 5-arg `execute(toolCallId, params, signal,
+  onUpdate, ctx)` into a 2-arg hook, so no tool repeats framework plumbing.
+  Each `src/tools/<tool>.ts` keeps a plain, `ExtensionContext`-free function
+  (unit-tested directly) plus a thin `buildXTool(pi)` / `registerXTool(pi)`.
+  The context-marking tools are `context-select` / `context-unselect` (one
+  shared adapter over the pure `runContextMark()` in
+  `src/tools/context-mark.ts`) and `context-autoselect` (adapter over
   `runAutoSelect()` in `src/tools/context-autoselect-engine.ts`).
 - The picker is MVVM: `src/picker/picker-view-model.ts` owns all state and
   behavior (phase machine, key dispatch, compression orchestration) with no

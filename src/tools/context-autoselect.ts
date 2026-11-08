@@ -8,24 +8,21 @@
  * so this can hide units but never select, compress, or delete them.
  */
 
-import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
 
-import {
-	CONTEXT_AUTOSELECT_TOOL_DEFINITION,
-	type ContextAutoselectParams,
-} from "../tool_definitions/context-autoselect.ts";
+import { CONTEXT_AUTOSELECT_TOOL_DEFINITION } from "../tool_definitions/context-autoselect.ts";
 import { loadState } from "../state.ts";
 import { buildTurnUnits } from "../turn-units.ts";
 import { describeMark } from "../mark-status.ts";
-import { runAutoSelect } from "./context-autoselect-engine.ts";
+import { createTool } from "./createTool.ts";
+import { runAutoSelect, type AutoSelectResult } from "./context-autoselect-engine.ts";
 
 function buildContextAutoselectToolImpl(
 	pi: ExtensionAPI,
 	definition: typeof CONTEXT_AUTOSELECT_TOOL_DEFINITION,
-): ToolDefinition<typeof CONTEXT_AUTOSELECT_TOOL_DEFINITION.parameters, unknown> {
-	return {
-		...definition,
-		async execute(_toolCallId, params: ContextAutoselectParams, signal, _onUpdate, ctx: ExtensionContext) {
+): ToolDefinition<typeof CONTEXT_AUTOSELECT_TOOL_DEFINITION.parameters, AutoSelectResult["details"]> {
+	return createTool(definition, {
+		execute: async (params, { signal, ctx }) => {
 			const entries = ctx.sessionManager.buildContextEntries();
 			const state = loadState(ctx);
 			const units = buildTurnUnits(entries).filter((u) => describeMark(u, state).effective !== "deleted");
@@ -37,10 +34,10 @@ function buildContextAutoselectToolImpl(
 
 			return { content: result.content, details: result.details };
 		},
-	};
+	});
 }
 
-export function buildContextAutoselectTool(pi: ExtensionAPI): ToolDefinition<typeof CONTEXT_AUTOSELECT_TOOL_DEFINITION.parameters, unknown> {
+export function buildContextAutoselectTool(pi: ExtensionAPI): ToolDefinition<typeof CONTEXT_AUTOSELECT_TOOL_DEFINITION.parameters, AutoSelectResult["details"]> {
 	return buildContextAutoselectToolImpl(pi, CONTEXT_AUTOSELECT_TOOL_DEFINITION);
 }
 

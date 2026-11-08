@@ -33,6 +33,7 @@ import { CONTEXT_UNSELECT_TOOL_DEFINITION, type ContextUnselectParams } from "..
 import { loadState, saveState, type ManageContextState } from "../state.ts";
 import { oneLine, preserveLineBreaks, type TurnUnit } from "../turn-units.ts";
 import { describeMark } from "../mark-status.ts";
+import { createTool } from "./createTool.ts";
 import { runContextMark } from "./context-mark.ts";
 
 /** Cap for the one-line heading in the autoselect listing. */
@@ -164,10 +165,11 @@ export function buildChildUnselectTool(
 	units: TurnUnit[],
 	dryRun: boolean,
 	unselected: string[],
-): ToolDefinition<typeof CONTEXT_UNSELECT_TOOL_DEFINITION.parameters, unknown> {
-	return {
-		...CONTEXT_UNSELECT_TOOL_DEFINITION,
-		async execute(_toolCallId, childParams: ContextUnselectParams) {
+): ToolDefinition<typeof CONTEXT_UNSELECT_TOOL_DEFINITION.parameters, string[]> {
+	// The hooks deliberately ignore the child's own env.ctx and close over the
+	// PARENT's ctx instead — the whole point of the in-process subagent.
+	return createTool(CONTEXT_UNSELECT_TOOL_DEFINITION, {
+		execute: async (childParams: ContextUnselectParams) => {
 			const state = loadState(ctx);
 			const result = runContextMark(units, state, childParams.groupIds, "unselect", CONTEXT_UNSELECT_TOOL_DEFINITION.name);
 			if (result.changed) {
@@ -176,7 +178,7 @@ export function buildChildUnselectTool(
 			}
 			return { content: result.content, details: result.details };
 		},
-	};
+	});
 }
 
 /** Run the child session: prompt it, cap its turns, propagate the parent's abort signal, always dispose. */
@@ -229,7 +231,7 @@ export async function runAutoSelect(
 	const unselected: string[] = [];
 	const session = await sessionFactory({
 		model: ctx.model,
-		customTools: [buildChildUnselectTool(pi, ctx, units, dryRun, unselected)],
+		customTools: [buildChildUnselectTool(pi, ctx, units, dryRun, unselected)] as ToolDefinition[],
 		sessionManager: SessionManager.inMemory(),
 		cwd: ctx.cwd,
 	});

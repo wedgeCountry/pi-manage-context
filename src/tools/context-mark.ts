@@ -14,13 +14,14 @@
  * matches after the fact.
  */
 
-import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 import type { CONTEXT_SELECT_TOOL_DEFINITION } from "../tool_definitions/context-select.ts";
 import type { CONTEXT_UNSELECT_TOOL_DEFINITION } from "../tool_definitions/context-unselect.ts";
 import { loadState, saveState, type ManageContextState, type Mark } from "../state.ts";
 import { buildTurnUnits, oneLine, type TurnUnit } from "../turn-units.ts";
 import { describeMark } from "../mark-status.ts";
+import { createTool } from "./createTool.ts";
 
 /** Cap for the one-line heading shown in the per-unit preview. */
 export const PREVIEW_HEADING_MAX = 80;
@@ -111,10 +112,9 @@ export function buildContextMarkTool(
 	pi: ExtensionAPI,
 	definition: typeof CONTEXT_SELECT_TOOL_DEFINITION | typeof CONTEXT_UNSELECT_TOOL_DEFINITION,
 	action: "select" | "unselect",
-): ToolDefinition<typeof definition.parameters, unknown> {
-	return {
-		...definition,
-		async execute(_toolCallId, params, _signal, _onUpdate, ctx: ExtensionContext) {
+): ToolDefinition<typeof CONTEXT_SELECT_TOOL_DEFINITION.parameters, string[]> {
+	return createTool(definition, {
+		execute: async (params, { ctx }) => {
 			const entries = ctx.sessionManager.buildContextEntries();
 			const state = loadState(ctx);
 			const units = buildTurnUnits(entries).filter((u) => describeMark(u, state).effective !== "deleted");
@@ -131,5 +131,5 @@ export function buildContextMarkTool(
 
 			return { content: result.content, details: result.details };
 		},
-	};
+	});
 }
