@@ -10,7 +10,7 @@ import type { ExtensionContext, SessionMessageEntry } from "@earendil-works/pi-c
 import { sessionEntryToContextMessages } from "@earendil-works/pi-coding-agent";
 
 import type { ManageContextState } from "./state.ts";
-import { contentToPreviewText, extractToolArguments, oneLine } from "./turn-units.ts";
+import { contentToPreviewText, extractToolArguments, toolCallResultText } from "./turn-units.ts";
 import type { TurnUnit } from "./turn-units.ts";
 
 const COMPRESSION_SYSTEM_PROMPT = `You compress a single entry from an AI coding agent's conversation history so it can be kept in context at a fraction of the size.
@@ -71,13 +71,7 @@ export function renderUnitForCompression(unit: TurnUnit): string {
 		if (assistantMsg.role !== "assistant") return ""; // unreachable, narrows the type
 		const calls = assistantMsg.content.filter((c) => c.type === "toolCall");
 		const callParts = calls.map((call, idx) => {
-			const result = unit.resultEntries.find(
-				(r) => r.message.role === "toolResult" && r.message.toolCallId === call.id,
-			);
-			const resultText =
-				result && result.message.role === "toolResult"
-					? contentToPreviewText(result.message.content)
-					: "(no result yet)";
+			const resultText = toolCallResultText(unit, call.id);
 			const argumentsJson = extractToolArguments(call.arguments);
 			return `Tool call ${idx + 1}: ${call.name}(${JSON.stringify(argumentsJson)})\nResult: ${truncate(resultText)}`;
 		});

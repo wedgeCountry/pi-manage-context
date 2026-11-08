@@ -3,11 +3,17 @@
  * they're sent to the model.
  *
  * Usage:
- *   /manage_context                      open the picker
+ *   /manage_context (alias /mc)          open the picker
+ *   /manage_context auto [focus]         run the context-autoselect subagent right away
  *   /manage_context <provider>/<modelId> set the compression model, then open the picker
  *   /manage_context model                print the currently configured compression model
  *   /export_context [filename.md]        write the summarized context as a markdown file to the current dir
  *   /toggle-read-hook                    toggle the read tool's post-execution hook (default: off)
+ *
+ * Agent tools: context-select / context-unselect flip turn units by groupId
+ * (empty groupIds is a no-op); context-autoselect spawns a subagent whose only
+ * tool is context-unselect to hide irrelevant/outdated units; view_context
+ * reports the current context. Matching is groupId-only.
  *
  * Keys inside the picker:
  *   Up/Down, PageUp/PageDown   navigate
@@ -44,7 +50,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { registerCommands } from "./src/commands.ts";
 import { registerHooks } from "./src/hooks.ts";
-import { registerManageContextTool } from "./src/tools/manage-context.ts";
+import { registerContextAutoselectTool } from "./src/tools/context-autoselect.ts";
+import { registerContextMarkTools } from "./src/tools/context-mark.ts";
 import { registerViewContextTool } from "./src/tools/view-context.ts";
 
 // Re-exported for the tests in tests/index.test.ts.
@@ -58,7 +65,8 @@ export default function (pi: ExtensionAPI): void {
 	});
 
 	registerHooks(pi);
-	registerManageContextTool(pi);
+	registerContextMarkTools(pi);
+	registerContextAutoselectTool(pi);
 	registerViewContextTool(pi);
 	registerCommands(pi, () => cachedModels);
 }

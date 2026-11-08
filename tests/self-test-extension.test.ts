@@ -46,24 +46,24 @@ const hasProviderCredential = () => {
     return stored.some((provider) => readStoredCredential(provider) !== undefined);
 };
 
-const maybeIt = hasProviderCredential() ? it : it.skip;
 import extension from "../index.ts";
 import { loadState } from "../src/state.ts";
 import { buildTurnUnits } from "../src/turn-units.ts";
 import { buildFilteredMessages } from "../src/context-filter.ts";
 
-describe("extension (integration)", () => {
-    it("agent calls the view_context tool successfully", async () => {
-        const settingsManager = SettingsManager.inMemory();
-        const loader = new DefaultResourceLoader({
-            cwd: process.cwd(),
-            agentDir: getAgentDir(),
-            settingsManager,
-            noExtensions: true,
-            noSkills: true,
-            extensionFactories: [extension],
-        });
-        await loader.reload();
+const maybeIt = hasProviderCredential() ? it : it.skip;
+
+async function createGlobalSession() {
+    const settingsManager = SettingsManager.inMemory();
+    const loader = new DefaultResourceLoader({
+        cwd: process.cwd(),
+        agentDir: getAgentDir(),
+        settingsManager,
+        noExtensions: true,
+        noSkills: true,
+        extensionFactories: [extension],
+    });
+    await loader.reload();
 
     return createAgentSession({
         modelRuntime: await ModelRuntime.create(),
@@ -73,10 +73,6 @@ describe("extension (integration)", () => {
         noTools: "builtin", // only extension tools are available
     });
 }
-import extension from "../index.ts";
-import { loadState } from "../src/state.ts";
-import { buildTurnUnits } from "../src/turn-units.ts";
-import { buildFilteredMessages } from "../src/context-filter.ts";
 
 describe("extension (integration)", () => {
     maybeIt("agent calls the view_context tool successfully", async () => {
@@ -103,25 +99,8 @@ describe("extension (integration)", () => {
 });
 
 describe("extension (unselect integration)", () => {
-    it("agent calls the manage-context tool successfully unselecting all messages", async () => {
-        const settingsManager = SettingsManager.inMemory();
-        const loader = new DefaultResourceLoader({
-            cwd: process.cwd(),
-            agentDir: getAgentDir(),
-            settingsManager,
-            noExtensions: true,
-            noSkills: true,
-            extensionFactories: [extension],
-        });
-        await loader.reload();
-
-        const { session } = await createAgentSession({
-            modelRuntime: await ModelRuntime.create(),
-            resourceLoader: loader,
-            sessionManager: SessionManager.inMemory(),
-            settingsManager,
-            noTools: "builtin", // only extension tools are available
-        });
+    maybeIt("agent calls context-unselect successfully unselecting all messages", async () => {
+        const { session } = await createGlobalSession();
 
         const calls: { toolName: string; isError: boolean }[] = [];
         session.subscribe((e) => {
@@ -132,18 +111,13 @@ describe("extension (unselect integration)", () => {
         let entriesAfter: ReturnType<typeof session.sessionManager.buildContextEntries> = [];
 
         try {
-            await session.prompt("Use the manage-context tool unselect all messages.");
+            await session.prompt("Use view_context to list the context entries, then context-unselect with all their groupIds to unselect all messages.");
             entriesAfter = session.sessionManager.buildContextEntries();
         } finally {
             session.dispose();
         }
 
-        // The tool is registered under two names (see CLAUDE.md's "One
-        // implementation, multiple registered names") — the model is free to
-        // call either.
-        expect(calls.some((c) => c.toolName === "manage-context" || c.toolName === "manage_context_select")).toBe(
-            true,
-        );
+        expect(calls.some((c) => c.toolName === "context-unselect")).toBe(true);
         for (const call of calls) expect(call.isError).toBe(false);
         expect(entriesAfter.length).toBeGreaterThan(entriesBefore.length);
 
@@ -160,7 +134,7 @@ describe("extension (unselect integration)", () => {
         const filtered = buildFilteredMessages(entriesAfter, units, state);
         expect(filtered.length).toBeLessThan(entriesAfter.length);
 
-        // The manage-context tool call itself — the assistant's toolCall
+        // The context-unselect tool call itself — the assistant's toolCall
         // block plus the toolResult it produced — should never be sent back
         // to the model: unselecting is meant to shrink context, not spend
         // tokens reporting on itself every subsequent turn. It should be
@@ -168,7 +142,7 @@ describe("extension (unselect integration)", () => {
         // it explicitly. But only the *last* such call auto-hides — if the
         // model called the tool more than once, earlier calls stay visible
         // rather than all of them silently vanishing.
-        const SELF_TOOL_NAMES = new Set(["manage-context", "manage_context_select"]);
+        const SELF_TOOL_NAMES = new Set(["context-select", "context-unselect", "context-autoselect"]);
         const selfToolCallIds = (u: (typeof units)[number]): string[] => {
             if (u.anchorEntry.type !== "message" || u.anchorEntry.message.role !== "assistant") return [];
             return u.anchorEntry.message.content
@@ -196,7 +170,7 @@ describe("extension (unselect integration)", () => {
         }
 
         // The assistant's final report to the user (a separate turn unit,
-        // kind "assistant_text") must stay — only the manage-context tool's
+        // kind "assistant_text") must stay — only the context tools'
         // own call/result unit auto-unselects, never the assistant's
         // subsequent reply. Checked against the unit's mark directly rather
         // than assuming its content always includes a text block: some

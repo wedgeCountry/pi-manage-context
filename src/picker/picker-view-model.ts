@@ -12,7 +12,7 @@ import { CompressionQueue, defaultResolveMark, type CompressionEvent } from "../
 import { MarksController, type MarkIntent } from "../marks-controller.ts";
 import type { Mark, ManageContextState } from "../state.ts";
 import { oneLine } from "../turn-units.ts";
-import type { TurnUnit, TurnUnitMetadata } from "../turn-units.ts";
+import type { ToolCallInfo, TurnUnit } from "../turn-units.ts";
 import type { CompressionService } from "../services/compression-service.ts";
 import type { StateService } from "../services/state-service.ts";
 import { defaultPickerConfig, type PickerConfig } from "./picker-config.ts";
@@ -36,9 +36,6 @@ export interface PickerViewModelDeps {
 	onClose: () => void;
 	config?: Partial<PickerConfig>;
 }
-
-/** One entry from `TurnUnitMetadata.toolCalls` — used for log previews. */
-type ToolCallInfo = NonNullable<TurnUnitMetadata["toolCalls"]>[number];
 
 export class PickerViewModel {
 	phase: PickerPhase = "editing";
@@ -86,8 +83,7 @@ export class PickerViewModel {
 		this.config = { ...defaultPickerConfig, ...deps.config };
 		this.marks = new MarksController(this.state, deps.units.map((u) => u.groupId));
 		this.previewContentWidth = this.config.sectionRuleWidth;
-		const minRows = this.config.minListRows;
-		this.maxVisible = Math.max(minRows, Math.min(deps.units.length, minRows));
+		this.maxVisible = this.config.minListRows;
 	}
 
 	markOf(groupId: string): Mark {
@@ -294,5 +290,3 @@ export class PickerViewModel {
 		return Math.max(0, this.previewMaxLineWidth - this.previewContentWidth);
 	}
 }
-
-export type { ToolCallInfo };

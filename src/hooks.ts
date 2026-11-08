@@ -4,8 +4,8 @@
  * wiring (register handlers/tools/commands) and the hook logic is importable
  * and testable on its own.
  *
- * The manage-context tool's own tool call + result are auto-unselected right
- * after it runs (see the "tool_result" hook below) — otherwise every
+ * The extension's own context tools' tool calls + results are auto-unselected
+ * right after they run (see the "tool_result" hook below) — otherwise every
  * subsequent turn would keep re-sending the tool call that was supposed to
  * shrink the context, defeating the point.
  */
@@ -18,25 +18,32 @@ import { buildFilteredMessages } from "./context-filter.ts";
 import { loadState, saveState, hasMarks, pruneMarks } from "./state.ts";
 import { buildTurnUnitGroups, buildTurnUnits, type TurnUnit } from "./turn-units.ts";
 
-export const SELF_UNSELECT_TOOL_NAMES = new Set(["manage-context"]);
+export const SELF_UNSELECT_TOOL_NAMES = new Set(["context-select", "context-unselect", "context-autoselect"]);
+
+/**
+ * The unit's single tool call, or null unless the unit is an assistant turn
+ * whose ONLY tool call this is. Hiding a unit hides every call bundled into
+ * it, so callers that auto-hide on a match must refuse to match when the
+ * call shares its turn with any other tool call (same collateral-damage
+ * guard for both matchers below) — otherwise unrelated calls' results would
+ * be hidden too just because they landed in the same assistant turn.
+ */
+export function singleToolCallOf(unit: TurnUnit) {
+	if (unit.kind !== "assistant_tool") return null;
+	if (unit.anchorEntry.type !== "message" || unit.anchorEntry.message.role !== "assistant") return null;
+
+	const toolCalls = unit.anchorEntry.message.content.filter((block) => block.type === "toolCall");
+	if (toolCalls.length !== 1) return null;
+
+	return toolCalls[0];
+}
 
 /**
  * True if `unit`'s anchor assistant message has exactly one tool call and
- * its id is `toolCallId`. Hiding a unit hides every call bundled into it, so
- * this deliberately refuses to match when the matching call shares its turn
- * with any other tool call (same collateral-damage guard as
- * unitHasMatchingRead below) — callers that auto-hide on a match would
- * otherwise also hide unrelated calls' results just because they happened
- * to land in the same assistant turn.
+ * its id is `toolCallId` (see singleToolCallOf for the collateral-damage guard).
  */
 export function unitHasMatchingToolCallId(unit: TurnUnit, toolCallId: string): boolean {
-	if (unit.kind !== "assistant_tool") return false;
-	if (unit.anchorEntry.type !== "message" || unit.anchorEntry.message.role !== "assistant") return false;
-
-	const toolCalls = unit.anchorEntry.message.content.filter((block) => block.type === "toolCall");
-	if (toolCalls.length !== 1) return false;
-
-	return toolCalls[0].id === toolCallId;
+	return singleToolCallOf(unit)?.id === toolCallId;
 }
 
 /**
@@ -46,13 +53,8 @@ export function unitHasMatchingToolCallId(unit: TurnUnit, toolCallId: string): b
  * a mark applies to the whole turn unit, not to one call within it.
  */
 export function unitHasMatchingRead(unit: TurnUnit, resolvedPath: string, currentToolCallId: string): boolean {
-	if (unit.kind !== "assistant_tool") return false;
-	if (unit.anchorEntry.type !== "message" || unit.anchorEntry.message.role !== "assistant") return false;
-
-	const toolCalls = unit.anchorEntry.message.content.filter((block) => block.type === "toolCall");
-	if (toolCalls.length !== 1) return false;
-
-	const [toolCall] = toolCalls;
+	const toolCall = singleToolCallOf(unit);
+	if (!toolCall) return false;
 	// Pro-forma: the current call's own unit shouldn't exist in
 	// buildContextEntries() yet at this point in the tool_result event, but
 	// never unselect the very call that just produced this result if it does.
@@ -106,7 +108,7 @@ export function handleReadToolResult(event: ToolResultEvent, ctx: ExtensionConte
 	}
 }
 
-/** tool_result hook: auto-unselect manage-context's own tool call (keeping only the latest one hidden). */
+/** tool_result hook: auto-unselect the extension's own context tools' calls (keeping only the latest one hidden). */
 export function handleSelfUnselectToolResult(event: ToolResultEvent, ctx: ExtensionContext, pi: ExtensionAPI): void {
 	if (!SELF_UNSELECT_TOOL_NAMES.has(event.toolName)) return;
 	if (event.isError) return;
@@ -118,8 +120,8 @@ export function handleSelfUnselectToolResult(event: ToolResultEvent, ctx: Extens
 	const state = loadState(ctx);
 	let changed = false;
 
-	// Only the most recently completed manage-context call stays
-	// auto-hidden. Without this, a session that calls the tool several
+	// Only the most recently completed context tool call stays
+	// auto-hidden. Without this, a session that calls the tools several
 	// times (e.g. one prompt triggering multiple unselect calls) would
 	// have every one of them vanish from context — restore any earlier
 	// call this same hook had hidden, unless the user has since taken it

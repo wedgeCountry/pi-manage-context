@@ -83,13 +83,27 @@ describe("extension (faux agent loop)", () => {
         expect(entriesAfter).toBeGreaterThan(entriesBefore);
     }, 30_000);
 
-    it("agent calls manage-context to unselect, marks persist and filter the context", async () => {
+    it("agent calls context-unselect by groupId, marks persist and filter the context", async () => {
         const faux = fauxProvider();
         faux.setResponses([
-            fauxAssistantMessage(
-                [fauxToolCall("manage-context", { action: "unselect", textMatch: "context" })],
-                { stopReason: "toolUse" },
-            ),
+            // Matching is groupId-only now, and entry ids are random — so the
+            // second scripted response is a factory that reads the view_context
+            // result out of the transcript and unselects every listed groupId.
+            fauxAssistantMessage([fauxToolCall("view_context", { format: "llm-json" })], {
+                stopReason: "toolUse",
+            }),
+            (context) => {
+                const toolResults = context.messages.filter(
+                    (m) => m.role === "toolResult" && m.toolName === "view_context",
+                ) as unknown as { content: { type: string; text?: string }[] }[];
+                const last = toolResults[toolResults.length - 1];
+                const text = last?.content?.find((c) => c.type === "text")?.text ?? "{}";
+                const parsed = JSON.parse(text) as { entries?: { id: string }[] };
+                const groupIds = (parsed.entries ?? []).map((e) => e.id);
+                return fauxAssistantMessage([fauxToolCall("context-unselect", { groupIds })], {
+                    stopReason: "toolUse",
+                });
+            },
             fauxAssistantMessage("Unselected."),
         ]);
 
@@ -106,7 +120,10 @@ describe("extension (faux agent loop)", () => {
             session.dispose();
         }
 
-        expect(calls).toEqual([{ toolName: "manage-context", isError: false }]);
+        expect(calls).toEqual([
+            { toolName: "view_context", isError: false },
+            { toolName: "context-unselect", isError: false },
+        ]);
 
         // The tool's effect is observable in persisted state and in the
         // messages that would be sent to the model afterwards.

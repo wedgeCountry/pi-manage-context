@@ -14,7 +14,8 @@ pi install --global git:github.com/wedgeCountry/pi-manage-context.git # global
 
 | Command | Description |
 |---|---|
-| `/manage_context` | Open the interactive picker |
+| `/manage_context` (alias `/mc`) | Open the interactive picker |
+| `/manage_context auto [focus]` (alias `/mc auto [focus]`) | Run the `context-autoselect` subagent right away (no picker), optionally with a focus description; unselected units are hidden on the next model turn |
 | `/manage_context <provider>/<modelId>` | Set the compression model, then open the picker |
 | `/manage_context model` | Print the configured compression model |
 | `/export_context [filename.md]` | Export the summarized context as markdown (timestamped name if omitted) |
@@ -42,10 +43,12 @@ export, or the model's context.
 | Tool | Purpose |
 |---|---|
 | `view_context` | Readable overview of the context: `format` = `summary` (default) / `detailed` / `llm-json`; `includeDeleted` (default `false`) |
-| `manage-context` | `action` = `list` / `select` / `unselect`, matched by `textMatch` (heading, message text, tool call name/args/result) and/or `groupIds` |
+| `context-select` | Mark turn units `selected` by `groupIds` (empty array = no-op) |
+| `context-unselect` | Mark turn units `unselected` by `groupIds` (empty array = no-op) |
+| `context-autoselect` | Spawn a subagent (its only tool is `context-unselect`) that unselects irrelevant/outdated units; `focus` describes the current task, `dryRun` (default `false`) reports without persisting |
 
-Unselected units are hidden from the model on its next turn but can be
-re-selected; they are not deleted.
+Matching is groupId-only. Unselected units are hidden from the model on its
+next turn but can be re-selected; they are not deleted.
 
 ## Architecture
 

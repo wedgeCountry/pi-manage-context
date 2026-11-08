@@ -7,8 +7,6 @@
 export interface PickerConfig {
 	/** Floor on visible list rows, even in a very short terminal. */
 	minListRows: number;
-	/** Terminal rows reserved for chrome when computing the fallback row budget (before the first render). */
-	initialHeightReserve: number;
 	/** Floor on how many rows the list keeps once the preview pane is open and splitting the remainder. */
 	minListBudgetWithPreview: number;
 	/** Fraction of the remaining rows given to the preview pane once it is open. */
@@ -65,7 +63,6 @@ export interface PickerConfig {
 
 export const defaultPickerConfig: PickerConfig = {
 	minListRows: 5,
-	initialHeightReserve: 8,
 	minListBudgetWithPreview: 3,
 	previewHeightRatio: 0.5,
 	minPreviewRows: 5,
