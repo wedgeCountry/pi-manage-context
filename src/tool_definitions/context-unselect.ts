@@ -28,4 +28,8 @@ export const CONTEXT_UNSELECT_TOOL_DEFINITION = {
 	description: DESCRIPTION,
 	promptSnippet: "context-unselect — hide context turns by groupId",
 	parameters: CONTEXT_UNSELECT_PARAMETERS,
+	// Sequential: these tools do load-modify-save on shared state, so two of
+	// them in the same assistant turn must not run concurrently (last
+	// saveState would clobber the other's marks).
+	executionMode: "sequential" as const,
 };

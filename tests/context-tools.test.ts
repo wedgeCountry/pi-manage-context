@@ -91,6 +91,14 @@ describe("context-select / context-unselect tools", () => {
 		}
 	});
 
+	it("all three context tools run sequentially (they do load-modify-save on shared state)", () => {
+		const { pi } = makeHarness([]);
+		const tools = [buildContextSelectTool(pi), buildContextUnselectTool(pi), buildContextAutoselectTool(pi)];
+		for (const tool of tools) {
+			expect((tool as any).executionMode).toBe("sequential");
+		}
+	});
+
 	it("context-unselect marks the given groupIds unselected and persists the snapshot", async () => {
 		const entries = [userEntry("e1", "Draft implementation"), userEntry("e2", "Final implementation")];
 		const { pi, ctx } = makeHarness(entries);

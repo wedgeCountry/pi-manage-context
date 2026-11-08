@@ -33,4 +33,7 @@ export const CONTEXT_AUTOSELECT_TOOL_DEFINITION = {
 	description: DESCRIPTION,
 	promptSnippet: "context-autoselect — let a subagent unselect irrelevant context turns",
 	parameters: CONTEXT_AUTOSELECT_PARAMETERS,
+	// Sequential: runs a multi-second subagent that does load-modify-save on
+	// shared state — a much wider race window than the other mark tools.
+	executionMode: "sequential" as const,
 };

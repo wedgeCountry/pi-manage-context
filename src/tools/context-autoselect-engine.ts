@@ -30,7 +30,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 import { CONTEXT_UNSELECT_TOOL_DEFINITION, type ContextUnselectParams } from "../tool_definitions/context-unselect.ts";
-import { saveState, type ManageContextState } from "../state.ts";
+import { loadState, saveState, type ManageContextState } from "../state.ts";
 import { oneLine, preserveLineBreaks, type TurnUnit } from "../turn-units.ts";
 import { describeMark } from "../mark-status.ts";
 import { runContextMark } from "./context-mark.ts";
@@ -149,20 +149,21 @@ export const MAX_CHILD_TURNS = 5;
 
 /**
  * The child's only tool: the real context-unselect definition whose execute
- * closes over the PARENT's pi and state. runContextMark already rejects
- * unknown groupIds, so the subagent can't invent ids.
+ * closes over the PARENT's pi and ctx. runContextMark already rejects unknown
+ * groupIds, so the subagent can't invent ids. State is re-loaded per call (not
+ * captured) so a multi-second subagent run never mutates a stale snapshot.
  */
 export function buildChildUnselectTool(
 	pi: ExtensionAPI,
-	_ctx: ExtensionContext,
+	ctx: ExtensionContext,
 	units: TurnUnit[],
-	state: ManageContextState,
 	dryRun: boolean,
 	unselected: string[],
 ): ToolDefinition<typeof CONTEXT_UNSELECT_TOOL_DEFINITION.parameters, unknown> {
 	return {
 		...CONTEXT_UNSELECT_TOOL_DEFINITION,
 		async execute(_toolCallId, childParams: ContextUnselectParams) {
+			const state = loadState(ctx);
 			const result = runContextMark(units, state, childParams.groupIds, "unselect", CONTEXT_UNSELECT_TOOL_DEFINITION.name);
 			if (result.changed) {
 				unselected.push(...result.details);
@@ -223,7 +224,7 @@ export async function runAutoSelect(
 	const unselected: string[] = [];
 	const session = await sessionFactory({
 		model: ctx.model,
-		customTools: [buildChildUnselectTool(pi, ctx, units, state, dryRun, unselected)],
+		customTools: [buildChildUnselectTool(pi, ctx, units, dryRun, unselected)],
 		sessionManager: SessionManager.inMemory(),
 		cwd: ctx.cwd,
 	});

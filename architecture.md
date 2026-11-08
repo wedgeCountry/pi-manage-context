@@ -86,7 +86,15 @@ by re-deriving it.
   in-process subagent via `createAgentSession` whose entire toolset is
   `context-unselect` (no extensions/skills/built-ins), so it can hide units
   but never select, compress, or delete them; the latest user turn is never
-  offered to it, and `dryRun: true` reports without persisting.
+  offered to it, and `dryRun: true` reports without persisting. All three
+  tools are `executionMode: "sequential"` because they do load-modify-save
+  on the shared state snapshot — concurrent execution within one assistant
+  turn would let the last `saveState` clobber the other's marks (autoselect's
+  multi-second subagent run makes that window large). The subagent's child
+  tool re-loads state per call for the same reason. An aborted or failed
+  autoselect run keeps any marks already persisted — there is no rollback,
+  matching the "persist immediately" semantics of the model calling
+  `context-unselect` itself.
 
 ## Tests
 

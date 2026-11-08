@@ -27,4 +27,8 @@ export const CONTEXT_SELECT_TOOL_DEFINITION = {
 	description: DESCRIPTION,
 	promptSnippet: "context-select — re-select hidden context turns by groupId",
 	parameters: CONTEXT_SELECT_PARAMETERS,
+	// Sequential: these tools do load-modify-save on shared state, so two of
+	// them in the same assistant turn must not run concurrently (last
+	// saveState would clobber the other's marks).
+	executionMode: "sequential" as const,
 };
