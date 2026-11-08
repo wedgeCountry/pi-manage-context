@@ -46,7 +46,7 @@ by re-deriving it.
   plumbing). The context-marking tools are `context-select` /
   `context-unselect` (thin adapters over the shared pure `runContextMark()`
   in `src/tools/context-mark.ts`) and `context-autoselect` (adapter over
-  `runAutoSelect()` in `src/tools/auto-select.ts`).
+  `runAutoSelect()` in `src/tools/context-autoselect-engine.ts`).
 - The picker is MVVM: `src/picker/picker-view-model.ts` owns all state and
   behavior (phase machine, key dispatch, compression orchestration) with no
   TUI imports and `handleInput()` returning `"render" | "close"`;

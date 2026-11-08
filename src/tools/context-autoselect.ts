@@ -17,7 +17,7 @@ import {
 import { loadState } from "../state.ts";
 import { buildTurnUnits } from "../turn-units.ts";
 import { describeMark } from "../mark-status.ts";
-import { runAutoSelect } from "./auto-select.ts";
+import { runAutoSelect } from "./context-autoselect-engine.ts";
 
 function buildContextAutoselectToolImpl(
 	pi: ExtensionAPI,

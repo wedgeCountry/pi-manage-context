@@ -9,7 +9,7 @@ import {
 	buildAutoListing,
 	buildAutoSelectTask,
 	summarizeAutoResult,
-} from "../src/tools/auto-select.ts";
+} from "../src/tools/context-autoselect-engine.ts";
 import { emptyState } from "../src/state.ts";
 import type { TurnUnit } from "../src/turn-units.ts";
 

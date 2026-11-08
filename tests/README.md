@@ -102,7 +102,7 @@ and `context-unselect`:
   effective mark appear in the output
 - **Mark field preservation**: unselecting a compressed unit keeps `compressedText`
 
-### auto-select-plain.test.ts
+### context-autoselect-plain.test.ts
 
 Unit tests for the pure halves of `context-autoselect`:
 

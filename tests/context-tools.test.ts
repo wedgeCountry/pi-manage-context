@@ -14,7 +14,7 @@ import type { UserMessage, AssistantMessage } from "@earendil-works/pi-ai";
 import { buildContextSelectTool } from "../src/tools/context-select.ts";
 import { buildContextUnselectTool } from "../src/tools/context-unselect.ts";
 import { buildContextAutoselectTool } from "../src/tools/context-autoselect.ts";
-import { runAutoSelect, type AutoSelectChildOptions, type AutoSelectSessionFactory } from "../src/tools/auto-select.ts";
+import { runAutoSelect, type AutoSelectChildOptions, type AutoSelectSessionFactory } from "../src/tools/context-autoselect-engine.ts";
 import { loadState } from "../src/state.ts";
 import { buildTurnUnits } from "../src/turn-units.ts";
 
