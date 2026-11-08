@@ -19,7 +19,7 @@ export type ContextUnselectParams = Static<typeof CONTEXT_UNSELECT_PARAMETERS>;
 export const CONTEXT_UNSELECT_TOOL_DEFINITION = {
 	name: "context-unselect",
 	label: "Unselect context units",
-	description: "Mark the turn units of the givenconversation context as unselected."
+	description: "Mark the turn units of the givenconversation context as unselected.",
 	parameters: CONTEXT_UNSELECT_PARAMETERS,
 	// Sequential: these tools do load-modify-save on shared state, so two of
 	// them in the same assistant turn must not run concurrently (last

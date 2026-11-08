@@ -42,7 +42,7 @@ export, or the model's context.
 
 | Tool | Purpose |
 |---|---|
-| `view_context` | Readable overview of the context: `format` = `summary` (default) / `detailed` / `llm-json`; `includeDeleted` (default `false`) |
+| `view_context` | Readable overview of the context: `format` = `summary` (default) / `detailed` / `llm-json` |
 | `context-select` | Mark turn units `selected` by `groupIds` (empty array = no-op) |
 | `context-unselect` | Mark turn units `unselected` by `groupIds` (empty array = no-op) |
 | `context-autoselect` | Spawn a subagent (its only tool is `context-unselect`) that unselects irrelevant/outdated units; `focus` describes the current task, `dryRun` (default `false`) reports without persisting |

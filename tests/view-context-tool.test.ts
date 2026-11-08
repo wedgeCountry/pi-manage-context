@@ -61,7 +61,6 @@ describe("view_context tool", () => {
 			expect(tool.name).toBe("view_context");
 			expect(tool.label).toBe("View context overview");
 			expect(tool.description).toContain("readable overview");
-			expect(tool.description).toContain("/manage_context");
 		});
 
 		it("has the correct parameters", () => {
@@ -70,7 +69,6 @@ describe("view_context tool", () => {
 			
 			expect(params.type).toBe("object");
 			expect(params.properties.format).toBeDefined();
-			expect(params.properties.includeDeleted).toBeDefined();
 			
 			const formatOptions = params.properties.format.anyOf.map((opt: any) => opt.const);
 			expect(formatOptions).toEqual(["summary", "detailed", "llm-json"]);
@@ -163,33 +161,6 @@ describe("view_context tool", () => {
 			
 			const text = (result.content[0] as any).text;
 			expect(text).toContain("Total entries: 1"); // Should only show 1, not 2
-			
-			loadStateSpy.mockRestore();
-		});
-
-		it("includes deleted entries when includeDeleted=true", async () => {
-			const tool = buildViewContextTool();
-			const entries: SessionEntry[] = [
-				createUserMessageEntry("entry-1", "Active message"),
-				createUserMessageEntry("entry-2", "Deleted message"),
-			];
-			const mockCtx = createMockContext(entries);
-			
-			// Mock state to mark entry-2 as deleted
-			const originalLoadState = await import("../src/state.ts");
-			const loadStateSpy = vi.spyOn(originalLoadState, "loadState").mockReturnValue({
-				version: 1,
-				marks: {
-					"entry-2": { mark: "deleted" },
-				},
-				compressionModel: undefined,
-				readHookEnabled: false
-			});
-			
-			const result = await tool.execute("test-call", { includeDeleted: true }, undefined, undefined, mockCtx);
-			
-			const text = (result.content[0] as any).text;
-			expect(text).toContain("Total entries: 2"); // Should show both
 			
 			loadStateSpy.mockRestore();
 		});

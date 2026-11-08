@@ -14,7 +14,7 @@ import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-age
 
 import { VIEW_CONTEXT_TOOL_DEFINITION, type ViewContextParams } from "../tool_definitions/view-context.ts";
 import { loadState, type ManageContextState } from "../state.ts";
-import { buildTurnUnits, visibleTurnUnits, type TurnUnit } from "../turn-units.ts";
+import { visibleTurnUnits, type TurnUnit } from "../turn-units.ts";
 import { toLLMMemoryEntry } from "../llm-export.ts";
 import { describeMark } from "../mark-status.ts";
 import { createTool } from "./createTool.ts";
@@ -187,8 +187,8 @@ export interface ViewContextResult {
 
 /**
  * Plain function: no ExtensionAPI/ExtensionContext involved. Takes the turn
- * units the caller already fetched (filtered for includeDeleted) and the
- * persisted state, and renders the requested format.
+ * units the caller already fetched and the persisted state, and renders the
+ * requested format.
  */
 export function buildContextOverview(units: TurnUnit[], state: ManageContextState, params: ViewContextParams): ViewContextResult {
 	if (units.length === 0) {
@@ -224,11 +224,9 @@ export function buildContextOverview(units: TurnUnit[], state: ManageContextStat
 export function buildViewContextTool(): ToolDefinition<typeof VIEW_CONTEXT_TOOL_DEFINITION.parameters, ViewContextResult["details"]> {
 	return createTool(VIEW_CONTEXT_TOOL_DEFINITION, {
 		execute: (params: ViewContextParams, { ctx }) => {
-			const includeDeleted = params.includeDeleted ?? false;
-
 			const entries = ctx.sessionManager.buildContextEntries();
 			const state = loadState(ctx);
-			const units = includeDeleted ? buildTurnUnits(entries) : visibleTurnUnits(entries, state);
+			const units = visibleTurnUnits(entries, state);
 
 			const { text, details } = buildContextOverview(units, state, params);
 			return { content: [{ type: "text", text }], details };

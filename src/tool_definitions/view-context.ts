@@ -12,9 +12,6 @@ export const VIEW_CONTEXT_PARAMETERS = Type.Object({
 			description: "Output format: 'summary' (brief overview), 'detailed' (full metadata), or 'llm-json' (structured JSON). Defaults to 'summary'.",
 		}),
 	),
-	includeDeleted: Type.Optional(
-		Type.Boolean({ description: "If true, include entries marked as 'deleted'. Defaults to false." }),
-	),
 });
 
 export type ViewContextParams = Static<typeof VIEW_CONTEXT_PARAMETERS>;
