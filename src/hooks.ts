@@ -4,8 +4,8 @@
  * wiring (register handlers/tools/commands) and the hook logic is importable
  * and testable on its own.
  *
- * The manage-context tool's own tool call + result are auto-unselected right
- * after it runs (see the "tool_result" hook below) — otherwise every
+ * The extension's own context tools' tool calls + results are auto-unselected
+ * right after they run (see the "tool_result" hook below) — otherwise every
  * subsequent turn would keep re-sending the tool call that was supposed to
  * shrink the context, defeating the point.
  */
@@ -18,7 +18,7 @@ import { buildFilteredMessages } from "./context-filter.ts";
 import { loadState, saveState, hasMarks, pruneMarks } from "./state.ts";
 import { buildTurnUnitGroups, buildTurnUnits, type TurnUnit } from "./turn-units.ts";
 
-export const SELF_UNSELECT_TOOL_NAMES = new Set(["manage-context"]);
+export const SELF_UNSELECT_TOOL_NAMES = new Set(["context-select", "context-unselect", "context-autoselect"]);
 
 /**
  * True if `unit`'s anchor assistant message has exactly one tool call and
@@ -106,7 +106,7 @@ export function handleReadToolResult(event: ToolResultEvent, ctx: ExtensionConte
 	}
 }
 
-/** tool_result hook: auto-unselect manage-context's own tool call (keeping only the latest one hidden). */
+/** tool_result hook: auto-unselect the extension's own context tools' calls (keeping only the latest one hidden). */
 export function handleSelfUnselectToolResult(event: ToolResultEvent, ctx: ExtensionContext, pi: ExtensionAPI): void {
 	if (!SELF_UNSELECT_TOOL_NAMES.has(event.toolName)) return;
 	if (event.isError) return;
@@ -118,8 +118,8 @@ export function handleSelfUnselectToolResult(event: ToolResultEvent, ctx: Extens
 	const state = loadState(ctx);
 	let changed = false;
 
-	// Only the most recently completed manage-context call stays
-	// auto-hidden. Without this, a session that calls the tool several
+	// Only the most recently completed context tool call stays
+	// auto-hidden. Without this, a session that calls the tools several
 	// times (e.g. one prompt triggering multiple unselect calls) would
 	// have every one of them vanish from context — restore any earlier
 	// call this same hook had hidden, unless the user has since taken it

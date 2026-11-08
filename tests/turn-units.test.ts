@@ -35,7 +35,7 @@ function toolResultEntry(entryId: string, toolCallId: string, text = ""): Sessio
     message: {
       role: "toolResult",
       toolCallId,
-      toolName: "manage-context",
+      toolName: "context-unselect",
       content: [{ type: "text", text }],
       isError: false,
       timestamp: 0,

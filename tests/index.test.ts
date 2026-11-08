@@ -123,14 +123,14 @@ describe("unitHasMatchingRead", () => {
 
 describe("unitHasMatchingToolCallId", () => {
   it("matches a unit whose anchor includes a tool call with the given id", () => {
-    const entry = toolCallEntry("entry_1", [{ toolCallId: "call_1", toolName: "manage-context", args: {} }]);
+    const entry = toolCallEntry("entry_1", [{ toolCallId: "call_1", toolName: "context-unselect", args: {} }]);
     const unit = assistantToolUnit(entry);
 
     expect(unitHasMatchingToolCallId(unit, "call_1")).toBe(true);
   });
 
   it("does not match a different tool call id in the same unit", () => {
-    const entry = toolCallEntry("entry_1", [{ toolCallId: "call_1", toolName: "manage-context", args: {} }]);
+    const entry = toolCallEntry("entry_1", [{ toolCallId: "call_1", toolName: "context-unselect", args: {} }]);
     const unit = assistantToolUnit(entry);
 
     expect(unitHasMatchingToolCallId(unit, "call_other")).toBe(false);
@@ -142,7 +142,7 @@ describe("unitHasMatchingToolCallId", () => {
     // unitHasMatchingRead's "bundled with another tool call" case below.
     const entry = toolCallEntry("entry_1", [
       { toolCallId: "call_1", toolName: "read", args: { path: "./hello.txt" } },
-      { toolCallId: "call_2", toolName: "manage-context", args: {} },
+      { toolCallId: "call_2", toolName: "context-unselect", args: {} },
     ]);
     const unit = assistantToolUnit(entry);
 
@@ -150,11 +150,11 @@ describe("unitHasMatchingToolCallId", () => {
   });
 
   it("does not match even when every call in the bundle is itself self-unselect-eligible", () => {
-    // Conservative on purpose: two manage-context calls bundled together
+    // Conservative on purpose: two context-unselect calls bundled together
     // still isn't the single-call shape this is scoped to handle.
     const entry = toolCallEntry("entry_1", [
-      { toolCallId: "call_1", toolName: "manage-context", args: {} },
-      { toolCallId: "call_2", toolName: "manage-context", args: {} },
+      { toolCallId: "call_1", toolName: "context-unselect", args: {} },
+      { toolCallId: "call_2", toolName: "context-unselect", args: {} },
     ]);
     const unit = assistantToolUnit(entry);
 
@@ -162,14 +162,14 @@ describe("unitHasMatchingToolCallId", () => {
   });
 
   it("does not match units that are not assistant_tool", () => {
-    const entry = toolCallEntry("entry_1", [{ toolCallId: "call_1", toolName: "manage-context", args: {} }]);
+    const entry = toolCallEntry("entry_1", [{ toolCallId: "call_1", toolName: "context-unselect", args: {} }]);
     const unit: TurnUnit = { ...assistantToolUnit(entry), kind: "user" };
 
     expect(unitHasMatchingToolCallId(unit, "call_1")).toBe(false);
   });
 
   it("does not match when the anchor entry is not an assistant message", () => {
-    const entry = toolCallEntry("entry_1", [{ toolCallId: "call_1", toolName: "manage-context", args: {} }]);
+    const entry = toolCallEntry("entry_1", [{ toolCallId: "call_1", toolName: "context-unselect", args: {} }]);
     const userEntry = {
       type: "message",
       id: entry.id,

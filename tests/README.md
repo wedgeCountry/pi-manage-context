@@ -10,12 +10,12 @@ This test suite provides comprehensive coverage for the context management tools
 
 Drives the full pi SDK agent loop (`createAgentSession` → `session.prompt` → tool
 execution → tool result → next model turn) with pi-ai's **Faux** model as the LLM.
-The faux provider's scripted responses issue real `view_context` and `manage-context`
-tool calls, so the tools execute against a real `AgentSession`/`SessionManager` —
-no network or credentials needed. Covers:
+The faux provider's scripted responses issue real `view_context` and
+`context-unselect` tool calls, so the tools execute against a real
+`AgentSession`/`SessionManager` — no network or credentials needed. Covers:
 - `view_context` called through the whole loop, session entries grow
-- `manage-context` unselect: marks persist in state and `buildFilteredMessages`
-  shrinks the model-visible context
+- `context-unselect` by groupId: marks persist in state and
+  `buildFilteredMessages` shrinks the model-visible context
 
 ### self-test-extension.test.ts
 
@@ -75,58 +75,57 @@ view_context({ includeDeleted: true }) → Shows all entries including deleted
 view_context({ format: "detailed", showRetention: true }) → Shows retention reasons
 ```
 
-### manage-context-tool.test.ts
+### context-mark-plain.test.ts
 
-Tests for the `manage-context` tool covering:
+Unit tests for the pure `runContextMark()` core shared by `context-select`
+and `context-unselect`:
 
-#### Structure Tests
-- Tool name validation
-- Parameter schema validation
-- Action options (list/select/unselect)
+- **groupId-only matching**: select/unselect by groupId; text never matches
+- **Empty-array no-op**: `changed: false`, state untouched, no-op message
+- **Unknown ids**: reported as not matched, never applied
+- **Preview-before-mutate**: each matched unit's id, heading, and previous
+  effective mark appear in the output
+- **Mark field preservation**: unselecting a compressed unit keeps `compressedText`
 
-#### Functional Tests - List Action
-- **Returns all turn units**: Verifies list returns entries with metadata
-- **Excludes deleted entries**: Verifies deleted entries filtered from list
-- **Includes mark status**: Verifies each entry shows its mark
+### auto-select-plain.test.ts
 
-#### Functional Tests - Select Action
-- **Text matching**: Tests selection by text substring
-- **ID matching**: Tests selection by specific groupIds
-- **Combined matching**: Tests OR logic between textMatch and groupIds
-- **No matches**: Tests behavior when nothing matches
-- **Missing parameters**: Tests error when neither textMatch nor groupIds provided
-- **Case insensitivity**: Tests case-insensitive search
-- **Content searching**: Tests search in full content, not just headings
+Unit tests for the pure halves of `context-autoselect`:
 
-#### Functional Tests - Unselect Action
-- **Text matching**: Tests unselection by text substring
-- **ID matching**: Tests unselection by specific groupIds
-- **Missing parameters**: Tests error handling
+- `buildAutoListing`: row shape (groupId/heading/type/tokenEstimate/summary/mark),
+  summary capping with line breaks preserved, heading flattened to one line,
+  and exclusion of only the LATEST user unit
+- `buildAutoSelectTask`: listing embedded as JSON plus focus and the
+  one-call/conservative instructions
+- `summarizeAutoResult`: unselected id list, dry-run flag, no-op case
 
-#### State Persistence Tests
-- **Select persists state**: Verifies saveState() called after select
-- **Unselect persists state**: Verifies saveState() called after unselect
-- **List doesn't persist**: Verifies saveState() NOT called for read-only list
+### context-tools.test.ts
+
+Integration tests for the three tools through an in-memory pi-runtime
+stand-in (appendEntry round-trips state snapshots exactly like the picker):
+
+- **Structure**: tool names; `groupIds` required string array; no
+  `textMatch`/`action` params; autoselect's optional `focus`/`dryRun`
+- **context-select / context-unselect**: marks persist via `saveState`;
+  empty `groupIds` persists nothing and doesn't notify; unknown ids rejected;
+  re-select after unselect works; notification only on actual change
+- **context-autoselect** (dependency-injected fake child-session factory):
+  the subagent gets `context-unselect` as its ONLY tool; its call lands in the
+  PARENT session's state; unknown ids rejected; `dryRun` reports without
+  persisting; latest user unit never offered; empty listing short-circuits
+  without spawning; parent abort signal propagates to the child session
 
 #### Key Test Scenarios
 ```typescript
-// List all entries
-manage-context({ action: "list" }) → JSON array of entries
+// Select / unselect by groupId
+context-select({ groupIds: ["entry-1", "entry-2"] })
+context-unselect({ groupIds: ["entry-1"] })
 
-// Select by text
-manage-context({ action: "select", textMatch: "file" }) → Matches entries with "file"
+// Empty array = no-op
+context-unselect({ groupIds: [] }) → "no groupIds given — nothing changed"
 
-// Select by IDs
-manage-context({ action: "select", groupIds: ["entry-1", "entry-2"] })
-
-// Select with both
-manage-context({ action: "select", textMatch: "draft", groupIds: ["entry-5"] })
-
-// Unselect by text
-manage-context({ action: "unselect", textMatch: "brainstorming" })
-
-// Error: missing parameters
-manage-context({ action: "select" }) → "provide textMatch and/or groupIds"
+// Autoselect
+context-autoselect({ focus: "fix the login bug" })
+context-autoselect({ focus: "fix the login bug", dryRun: true }) → report only
 ```
 
 ## Test Helpers
@@ -188,20 +187,15 @@ npm test -- --watch
 - [x] Token count display
 - [x] Selection status display
 
-### manage-context-tool.test.ts
-- [x] Tool structure (both names)
-- [x] List action functionality
-- [x] Select action functionality
-- [x] Unselect action functionality
-- [x] Text matching (case-insensitive)
-- [x] ID matching
-- [x] Combined matching (OR logic)
-- [x] No matches handling
-- [x] Missing parameter validation
-- [x] State persistence (select)
-- [x] State persistence (unselect)
-- [x] No persistence (list)
-- [x] Backward compatibility
+### context-tools.test.ts
+- [x] Tool structure (names, groupIds schema, autoselect focus/dryRun)
+- [x] Select/unselect by groupId
+- [x] Empty-array no-op (nothing persisted, no notification)
+- [x] Unknown groupIds rejected
+- [x] State persistence (select/unselect)
+- [x] Autoselect child gets context-unselect as its only tool
+- [x] Autoselect lands in parent state; dryRun persists nothing
+- [x] Latest user unit excluded; abort propagation
 
 ## What Makes These Tests Meaningful
 
@@ -258,19 +252,19 @@ expect(json.summary.totalEntries).toBe(1);
 expect(Array.isArray(json.entries)).toBe(true);
 ```
 
-### 6. **Test Search Behavior**
+### 6. **Test Matching Behavior**
 
-Verify search works correctly across different scenarios:
+Verify groupId matching works correctly across different scenarios:
 
 ```typescript
-// Case insensitive
-textMatch: "FILE" matches "file operation"
+// Exact groupId match
+context-unselect({ groupIds: ["entry-1"] }) marks only entry-1
 
-// Content search
-textMatch: "optimization" matches message containing "optimization"
+// Unknown ids are reported, never applied
+context-unselect({ groupIds: ["bogus"] }) → "No turn units matched"
 
-// Combined criteria
-textMatch: "draft" OR groupIds: ["entry-5"]
+// Empty array is a no-op
+context-unselect({ groupIds: [] }) → "no groupIds given — nothing changed"
 ```
 
 

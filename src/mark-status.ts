@@ -1,11 +1,11 @@
 /**
  * One place that decides how a unit's mark reads, for every surface: the
  * picker's rows and glyphs, view_context's summary/detailed/llm-json
- * formats, and manage-context's list output. Before this module existed,
- * each surface re-derived "effective" status from raw marks with slightly
- * different rules (view_context counted compressed by compressedText, the
- * picker by effectiveMark, manage-context by a mix of both), so the three
- * could disagree about the same unit.
+ * formats, and the context-select/context-unselect/context-autoselect tools.
+ * Before this module existed, each surface re-derived "effective" status from
+ * raw marks with slightly different rules (view_context counted compressed by
+ * compressedText, the picker by effectiveMark, the old manage-context tool by
+ * a mix of both), so the surfaces could disagree about the same unit.
  *
  * The key subtlety this encodes: a realized compression resets the stored
  * mark back to "selected" (see runCompressions in view.ts) while

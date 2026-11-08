@@ -42,10 +42,12 @@ export, or the model's context.
 | Tool | Purpose |
 |---|---|
 | `view_context` | Readable overview of the context: `format` = `summary` (default) / `detailed` / `llm-json`; `includeDeleted` (default `false`) |
-| `manage-context` | `action` = `list` / `select` / `unselect`, matched by `textMatch` (heading, message text, tool call name/args/result) and/or `groupIds` |
+| `context-select` | Mark turn units `selected` by `groupIds` (empty array = no-op) |
+| `context-unselect` | Mark turn units `unselected` by `groupIds` (empty array = no-op) |
+| `context-autoselect` | Spawn a subagent (its only tool is `context-unselect`) that unselects irrelevant/outdated units; `focus` describes the current task, `dryRun` (default `false`) reports without persisting |
 
-Unselected units are hidden from the model on its next turn but can be
-re-selected; they are not deleted.
+Matching is groupId-only. Unselected units are hidden from the model on its
+next turn but can be re-selected; they are not deleted.
 
 ## Architecture
 

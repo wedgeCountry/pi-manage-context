@@ -274,8 +274,8 @@ export function enrichGroup(group: TurnUnitGroup): TurnUnitMetadata {
 							// Capped like every other text path here (preserveLineBreaks is used
 							// for user/assistant/custom_message summaries below) — an uncapped
 							// tool result (e.g. a large file read) would make this unit's own
-							// list/textMatch footprint as big as the context the
-							// manage-context tool exists to shrink.
+							// listing footprint as big as the context the context tools
+							// exist to shrink.
 							const resultText =
 								result && result.message.role === "toolResult"
 									? preserveLineBreaks(contentToPreviewText(result.message.content))

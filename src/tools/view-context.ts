@@ -5,9 +5,9 @@
  * making it easy for the model to understand what's in context without
  * needing to parse raw messages.
  *
- * Unlike manage-context (which is for programmatic select/unselect
- * operations), this tool is designed for human-readable inspection and
- * awareness of the current context state.
+ * Unlike context-select / context-unselect (which are for programmatic
+ * mark changes by groupId), this tool is designed for human-readable
+ * inspection and awareness of the current context state.
  */
 
 import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
