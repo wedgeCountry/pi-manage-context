@@ -55,9 +55,12 @@ async function runAutoSelectCommand(pi: ExtensionAPI, ctx: ExtensionCommandConte
 	}
 }
 
+type SlashCommand = Parameters<ExtensionAPI["registerCommand"]>[1];
+
 export function registerCommands(pi: ExtensionAPI, cachedModels: () => Model<Api>[]): void {
-	pi.registerCommand("manage_context", {
-		description: "Review, select, compress, or delete messages from the model's context; 'auto [focus]' runs the context-autoselect subagent right away",
+	// /mc is an alias: same definition object registered under a second name.
+	const manageContextCommand: SlashCommand = {
+		description: "Review, select, compress, or delete messages from the model's context; 'auto [focus]' runs the context-autoselect subagent right away (alias: /mc)",
 		getArgumentCompletions(prefix: string): AutocompleteItem[] | null {
 			const items: AutocompleteItem[] = [];
 			if ("auto".startsWith(prefix)) {
@@ -137,7 +140,9 @@ export function registerCommands(pi: ExtensionAPI, cachedModels: () => Model<Api
 				{ overlay: true, overlayOptions: { width: "100%", maxHeight: "100%" } },
 			);
 		},
-	});
+	};
+	pi.registerCommand("manage_context", manageContextCommand);
+	pi.registerCommand("mc", manageContextCommand);
 
 	pi.registerCommand("export_context", {
 		description: "Export the current context as a markdown file to the working directory",

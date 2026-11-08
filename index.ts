@@ -3,7 +3,7 @@
  * they're sent to the model.
  *
  * Usage:
- *   /manage_context                      open the picker
+ *   /manage_context (alias /mc)          open the picker
  *   /manage_context auto [focus]         run the context-autoselect subagent right away
  *   /manage_context <provider>/<modelId> set the compression model, then open the picker
  *   /manage_context model                print the currently configured compression model
