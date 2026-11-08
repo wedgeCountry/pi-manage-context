@@ -61,8 +61,9 @@ all go through `visibleTurnUnits()` (`src/turn-units.ts`) — the single
   `src/tools/context-autoselect-engine.ts`). The subagent's instruction is
   not inline code: `src/tools/autoselect-prompt.ts` loads a template from
   `.pi/context-autoselect.md` (per-project override) or the bundled
-  `prompts/context-autoselect.md` (editable, read at runtime), with an
-  embedded fallback, and fills its `{{focus}}`/`{{listing}}` placeholders.
+  `prompts/context-autoselect.md` (editable, read at runtime) and fills its
+  `{{focus}}`/`{{listing}}` placeholders. The file is the single source of
+  truth — there is no in-code copy to drift out of sync.
 - The picker is MVVM: `src/picker/picker-view-model.ts` owns all state and
   behavior (phase machine, key dispatch, compression orchestration) with no
   TUI imports and `handleInput()` returning `"render" | "close"`;

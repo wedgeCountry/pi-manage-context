@@ -100,20 +100,17 @@ describe("buildAutoListing", () => {
 });
 
 describe("buildAutoSelectTask", () => {
-	it("embeds the listing as JSON, the focus, and the one-call conservative instructions", () => {
+	it("renders the given template with the listing as JSON and the focus filled in", () => {
 		const listing = buildAutoListing([makeUnit("e1", "assistant_text", "answer")], emptyState());
 
-		const task = buildAutoSelectTask(listing, "fixing the auth bug");
+		const task = buildAutoSelectTask(listing, "fixing the auth bug", "Task: {{focus}}\nUnits: {{listing}}");
 
-		expect(task).toContain("fixing the auth bug");
+		expect(task).toContain("Task: fixing the auth bug");
 		expect(task).toContain('"groupId": "e1"');
-		expect(task).toContain("context-unselect ONCE");
-		expect(task).toMatch(/conservative/i);
-		expect(task).toMatch(/latest user turn is not in this list/i);
 	});
 
 	it("notes when no focus was provided", () => {
-		const task = buildAutoSelectTask([], undefined);
+		const task = buildAutoSelectTask([], undefined, "{{focus}}");
 		expect(task).toMatch(/not specified/i);
 	});
 });

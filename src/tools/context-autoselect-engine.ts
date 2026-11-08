@@ -30,7 +30,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 import { CONTEXT_UNSELECT_TOOL_DEFINITION, type ContextUnselectParams } from "../tool_definitions/context-unselect.ts";
-import { DEFAULT_AUTOSELECT_TEMPLATE, loadAutoSelectTemplate, renderAutoSelectTask } from "./autoselect-prompt.ts";
+import { loadAutoSelectTemplate, renderAutoSelectTask } from "./autoselect-prompt.ts";
 import { loadState, saveState, type ManageContextState } from "../state.ts";
 import { oneLine, preserveLineBreaks, type TurnUnit } from "../turn-units.ts";
 import { describeMark } from "../mark-status.ts";
@@ -90,7 +90,7 @@ export function buildAutoListing(units: TurnUnit[], state: ManageContextState): 
  * or a per-project .pi/context-autoselect.md) with the listing and focus
  * filled in.
  */
-export function buildAutoSelectTask(listing: AutoListingRow[], focus?: string, template: string = DEFAULT_AUTOSELECT_TEMPLATE): string {
+export function buildAutoSelectTask(listing: AutoListingRow[], focus: string | undefined, template: string): string {
 	return renderAutoSelectTask(template, listing, focus);
 }
 

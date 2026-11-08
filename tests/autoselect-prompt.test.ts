@@ -1,8 +1,9 @@
 /**
  * Tests for the editable context-autoselect subagent instruction:
  * renderAutoSelectTask() (placeholder substitution), buildAutoSelectTask()
- * with a custom template, and loadAutoSelectTemplate() (project override,
- * bundled file, embedded fallback).
+ * with a caller-supplied template, and loadAutoSelectTemplate() (project
+ * override, bundled file as single source of truth, loud failure when the
+ * bundled file is unreadable).
  */
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -11,7 +12,7 @@ import { describe, expect, it } from "vitest";
 
 import { buildAutoSelectTask, type AutoListingRow } from "../src/tools/context-autoselect-engine.ts";
 import {
-	DEFAULT_AUTOSELECT_TEMPLATE,
+	BUNDLED_TEMPLATE_PATH,
 	NO_FOCUS_TEXT,
 	PROJECT_TEMPLATE_PATH,
 	renderAutoSelectTask,
@@ -42,19 +43,9 @@ describe("renderAutoSelectTask", () => {
 });
 
 describe("buildAutoSelectTask", () => {
-	it("renders the default template identically to the previous inline prompt", () => {
-		const task = buildAutoSelectTask(listing, "fixing the auth bug");
-		expect(task).toContain("fixing the auth bug");
-		expect(task).toContain('"groupId": "e1"');
-		expect(task).toContain("context-unselect ONCE");
-		expect(task).toMatch(/conservative/i);
-		expect(task).toMatch(/latest user turn is not in this list/i);
-		expect(buildAutoSelectTask([], undefined)).toMatch(/not specified/i);
-	});
-
-	it("renders a caller-supplied custom template", () => {
-		const task = buildAutoSelectTask(listing, "f", "Custom instructions for {{focus}}: {{listing}}");
-		expect(task).toBe('Custom instructions for f: ' + JSON.stringify(listing, null, 2));
+	it("renders the caller-supplied template with listing and focus filled in", () => {
+		const task = buildAutoSelectTask(listing, "fixing the auth bug", "Task: {{focus}}\nUnits: {{listing}}");
+		expect(task).toBe("Task: fixing the auth bug\nUnits: " + JSON.stringify(listing, null, 2));
 	});
 });
 
@@ -63,14 +54,23 @@ describe("loadAutoSelectTemplate", () => {
 		const dir = await mkdtemp(join(tmpdir(), "mc-prompt-"));
 		try {
 			const template = await loadAutoSelectTemplate(dir);
-			expect(template).toContain("{{focus}}");
-			expect(template).toContain("{{listing}}");
-			expect(template).toContain("context-unselect ONCE");
-			const onDisk = await readFile(join(import.meta.dirname, "..", "prompts", "context-autoselect.md"), "utf-8");
-			expect(template).toBe(onDisk);
+			expect(template).toBe(await readFile(BUNDLED_TEMPLATE_PATH, "utf-8"));
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
+	});
+
+	it("the bundled file is the single source of truth: it carries the placeholders and the instructions", async () => {
+		const template = await readFile(BUNDLED_TEMPLATE_PATH, "utf-8");
+		expect(template).toContain("{{focus}}");
+		expect(template).toContain("{{listing}}");
+		expect(template).toContain("context-unselect ONCE");
+		const task = buildAutoSelectTask(listing, "fixing the auth bug", template);
+		expect(task).toContain("fixing the auth bug");
+		expect(task).toContain('"groupId": "e1"');
+		expect(task).toMatch(/conservative/i);
+		expect(task).toMatch(/latest user turn is not in this list/i);
+		expect(buildAutoSelectTask([], undefined, template)).toMatch(/not specified/i);
 	});
 
 	it("prefers a per-project .pi/context-autoselect.md override", async () => {
@@ -82,11 +82,5 @@ describe("loadAutoSelectTemplate", () => {
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
-	});
-
-	it("the embedded default matches the shipped template's intent", () => {
-		expect(DEFAULT_AUTOSELECT_TEMPLATE).toContain("{{focus}}");
-		expect(DEFAULT_AUTOSELECT_TEMPLATE).toContain("{{listing}}");
-		expect(renderAutoSelectTask(DEFAULT_AUTOSELECT_TEMPLATE, listing, "f")).toContain('"groupId": "e1"');
 	});
 });
