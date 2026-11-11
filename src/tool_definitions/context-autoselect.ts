@@ -14,7 +14,8 @@ export const CONTEXT_AUTOSELECT_PARAMETERS = Type.Object({
 	),
 	dryRun: Type.Optional(
 		Type.Boolean({
-			description: "Report the groupIds the subagent would unselect without persisting anything. Defaults to false.",
+			description: "Report the groupIds the subagent would unselect without persisting anything.",
+			default: false,
 		}),
 	),
 });
@@ -22,7 +23,8 @@ export const CONTEXT_AUTOSELECT_PARAMETERS = Type.Object({
 export type ContextAutoselectParams = Static<typeof CONTEXT_AUTOSELECT_PARAMETERS>;
 
 const DESCRIPTION =
-	"Review all turn units in your own conversation context with a subagent and unselect the ones that are irrelevant or outdated for the current task. ";
+	"Review all turn units in your own conversation context with a subagent and unselect the ones that are irrelevant or outdated for the current task. " +
+	"The goal is to free up the model's limited context memory by keeping only the most crucial parts of the context. ";
 
 export const CONTEXT_AUTOSELECT_TOOL_DEFINITION = {
 	name: "context-autoselect",
