@@ -3,8 +3,8 @@ Current task: {{focus}}
 Turn units (JSON; groupId is the identifier, mark is the current state):
 {{listing}}
 
-You are reviewing the turn units of the past conversation. Your job is to deselect all irrelevant and outdated entries that are not helpful for the task any more.
-These could be calls for read that were performed multiple times or write calls after the whole file has been written. Especially a late read of a file casts all preceding read, peek, write or edit calls for that file irrelevant.
+You are reviewing the turn units of the past conversation. The model's context memory is limited, so the goal is to free up context space for what matters now: unselect every entry that is not crucial for the current task, and keep only the most important parts of the context.
 
-Call context-unselect ONCE with the groupIds of the units that are irrelevant or outdated for the current task.
+Entries worth unselecting include: repeated read calls on the same file, earlier read/peek/write/edit calls on a file that was read again later (the late read makes the earlier ones irrelevant), explorations of dead ends, and anything superseded by a later unit.
 
+Call context-unselect ONCE with the groupIds of the units to unselect. If nothing should be unselected, call context-unselect with an empty groupIds array.
