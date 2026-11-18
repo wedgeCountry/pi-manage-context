@@ -105,13 +105,27 @@ Unit tests for the pure halves of `context-autoselect`:
 - `buildAutoListing`: row shape (groupId/heading/type/tokenEstimate/summary/mark),
   summary capping with line breaks preserved, heading flattened to one line,
   and exclusion of only the LATEST user unit
-- `buildAutoSelectTask`: listing embedded as JSON plus focus and the
-  one-call/conservative instructions
+- `buildAutoSelectTask`: the context text list (`formatAutoListingText`) embedded
+  plus the focus
 - `summarizeAutoResult`: unselected id list, dry-run flag, no-op case
+
+### rate-context-plain.test.ts
+
+Unit tests for the pure halves of `rate-context` (the autoselect subagent's only
+tool):
+
+- `isValidRating`: scores must be finite numbers within 1-10
+- `formatRatingsExport` / `rateContextExportFilename`: markdown table of the
+  input ratings + threshold (pipes escaped, reasons flattened), plain
+  timestamped `.md` filename
+- `runRateContext`: entries scored strictly below the threshold are unselected
+  (score == threshold stays), default threshold 5, out-of-range threshold
+  clamped, unknown ids reported as not matched, invalid scores ignored, empty
+  ratings = no-op that still produces the export markdown
 
 ### context-tools.test.ts
 
-Integration tests for the three tools through an in-memory pi-runtime
+Integration tests for the context tools through an in-memory pi-runtime
 stand-in (appendEntry round-trips state snapshots exactly like the picker):
 
 - **Structure**: tool names; `groupIds` required string array; no
@@ -120,10 +134,32 @@ stand-in (appendEntry round-trips state snapshots exactly like the picker):
   empty `groupIds` persists nothing and doesn't notify; unknown ids rejected;
   re-select after unselect works; notification only on actual change
 - **context-autoselect** (dependency-injected fake child-session factory):
-  the subagent gets `context-unselect` as its ONLY tool; its call lands in the
-  PARENT session's state; unknown ids rejected; `dryRun` reports without
-  persisting; latest user unit never offered; empty listing short-circuits
-  without spawning; parent abort signal propagates to the child session
+  the subagent gets `rate-context` as its ONLY tool and the context text list
+  plus the rate-context instruction as its task; its below-threshold ratings
+  land in the PARENT session's state and write a ratings export file to the
+  cwd; unknown ids rejected; `dryRun` reports without persisting; latest user
+  unit never offered; empty listing short-circuits without spawning; parent
+  abort signal propagates to the child session
+
+### rate-context.test.ts
+
+Integration tests for the `rate-context` tool with a **mocked subagent**
+(fake child-session factory, as above):
+
+- **Definition**: name `rate-context`, `executionMode: "sequential"`, required
+  `ratings` array of `{id, score (min 1, max 10), reason}` tuples, optional
+  `threshold`
+- **Direct child-tool execution** (in-memory pi stand-in, temp cwd): writes
+  the ratings export file (`context-ratings-*.md`) to the cwd, unselects
+  exactly the below-threshold entries in the parent state, reports the export
+  path; `dryRun` records without persisting (export still written); unknown
+  ids and out-of-range scores change nothing
+- **Mocked subagent via `runAutoSelect`**: the task prompt contains the
+  context text list (`- ID: ...`, latest user turn excluded) and the
+  rate-context instruction ("list of tuples", "between 1 and 10", outdated =
+  low relevance); the child toolset is exactly `[rate-context]`; the scripted
+  ratings unselect the below-threshold entries in the parent state; a high
+  threshold unselects all rated entries; `dryRun` persists none
 
 #### Key Test Scenarios
 ```typescript
@@ -203,8 +239,9 @@ npm test -- --watch
 - [x] Empty-array no-op (nothing persisted, no notification)
 - [x] Unknown groupIds rejected
 - [x] State persistence (select/unselect)
-- [x] Autoselect child gets context-unselect as its only tool
-- [x] Autoselect lands in parent state; dryRun persists nothing
+- [x] Autoselect child gets rate-context as its only tool, with the context text list + rate instruction as its task
+- [x] Autoselect lands in parent state (below-threshold ratings unselected); dryRun persists nothing
+- [x] Rate-context export file written to cwd (see rate-context.test.ts)
 - [x] Latest user unit excluded; abort propagation
 
 ## What Makes These Tests Meaningful

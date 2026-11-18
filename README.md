@@ -45,7 +45,7 @@ export, or the model's context.
 | `view_context` | Readable overview of the context: `format` = `summary` (default) / `detailed` / `llm-json` |
 | `context-select` | Mark turn units `selected` by `groupIds` (empty array = no-op) |
 | `context-unselect` | Mark turn units `unselected` by `groupIds` (empty array = no-op) |
-| `context-autoselect` | Spawn a subagent (its only tool is `context-unselect`) that unselects irrelevant/outdated units; `focus` describes the current task, `dryRun` (default `false`) reports without persisting |
+| `context-autoselect` | Spawn a subagent (its only tool is `rate-context`) that rates every context entry it is given in the context text list with a tuple of `(ID, score 1-10, reason)`, writes a ratings export file, and unselects the entries scored below its threshold — i.e. the irrelevant/outdated units; `focus` describes the current task, `dryRun` (default `false`) reports without persisting |
 
 Matching is groupId-only. Unselected units are hidden from the model on its
 next turn but can be re-selected; they are not deleted.
@@ -56,7 +56,11 @@ The instruction given to the `context-autoselect` subagent lives in its own
 editable file, [`prompts/context-autoselect.md`](prompts/context-autoselect.md),
 which is read at runtime — edit it and the change applies on the next run, no
 rebuild needed. It contains `{{focus}}` and `{{listing}}` placeholders that are
-filled in with the current task focus and the JSON listing of turn units.
+filled in with the current task focus and the context text list of turn units
+(each block starts with the entry's `ID`). The subagent's only tool is
+`rate-context`: it takes a list of `(ID, score, reason)` tuples plus a
+`threshold`, writes an export file of the ratings to the working directory, and
+unselects every entry scored below the threshold.
 
 To override the prompt for a single project, place your own template at
 `.pi/context-autoselect.md` in the project directory; it takes precedence over

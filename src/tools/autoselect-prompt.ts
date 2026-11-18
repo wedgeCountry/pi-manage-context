@@ -10,7 +10,9 @@
  * silently running a stale prompt.
  *
  * The template may contain {{focus}} and {{listing}} placeholders, which
- * renderAutoSelectTask() fills in. buildAutoSelectTask() in
+ * renderAutoSelectTask() fills in — {{listing}} with the manage-context TEXT
+ * LIST of the context entries (formatAutoListingText), the readable list a
+ * human gets from the picker / view_context. buildAutoSelectTask() in
  * context-autoselect-engine.ts is the pure entry point used by tests.
  */
 
@@ -29,11 +31,32 @@ export const BUNDLED_TEMPLATE_PATH = fileURLToPath(new URL("../../prompts/contex
 /** Substituted for {{focus}} when the caller gave no focus. */
 export const NO_FOCUS_TEXT = "(not specified — judge relevance to the conversation as a whole)";
 
-/** Fill the template's {{listing}} and {{focus}} placeholders. */
+/**
+ * The manage-context TEXT LIST of the listing rows — one block per context
+ * entry, with the ID (groupId) the subagent must put into its rate-context
+ * tuples first on each entry so the rating is unambiguous.
+ */
+export function formatAutoListingText(listing: AutoListingRow[]): string {
+	if (listing.length === 0) return "(no context entries)";
+	return listing
+		.map((row) => {
+			const summaryLines = row.summary.split("\n").map((line) => `  ${line}`);
+			return [
+				`- ID: ${row.groupId}`,
+				`  Heading: ${row.heading}`,
+				`  Type: ${row.type} | Tokens: ~${row.tokenEstimate} | Mark: ${row.mark}`,
+				"  Summary:",
+				...summaryLines,
+			].join("\n");
+		})
+		.join("\n\n");
+}
+
+/** Fill the template's {{listing}} (text list) and {{focus}} placeholders. */
 export function renderAutoSelectTask(template: string, listing: AutoListingRow[], focus?: string): string {
 	const focusText = focus && focus.trim() ? focus : NO_FOCUS_TEXT;
 	return template
-		.replaceAll("{{listing}}", JSON.stringify(listing, null, 2))
+		.replaceAll("{{listing}}", formatAutoListingText(listing))
 		.replaceAll("{{focus}}", focusText);
 }
 

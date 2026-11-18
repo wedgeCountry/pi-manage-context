@@ -12,8 +12,10 @@
  *
  * Agent tools: context-select / context-unselect flip turn units by groupId
  * (empty groupIds is a no-op); context-autoselect spawns a subagent whose only
- * tool is context-unselect to hide irrelevant/outdated units; view_context
- * reports the current context. Matching is groupId-only.
+ * tool is rate-context — given the context text list, it rates every entry
+ * (ID, score 1-10, reason), writes a ratings export file, and unselects the
+ * entries scored below its threshold — to hide irrelevant/outdated units;
+ * view_context reports the current context. Matching is groupId-only.
  *
  * Keys inside the picker:
  *   Up/Down, PageUp/PageDown   navigate

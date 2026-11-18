@@ -62,8 +62,13 @@ all go through `visibleTurnUnits()` (`src/turn-units.ts`) — the single
   not inline code: `src/tools/autoselect-prompt.ts` loads a template from
   `.pi/context-autoselect.md` (per-project override) or the bundled
   `prompts/context-autoselect.md` (editable, read at runtime) and fills its
-  `{{focus}}`/`{{listing}}` placeholders. The file is the single source of
-  truth — there is no in-code copy to drift out of sync.
+  `{{focus}}`/`{{listing}}` placeholders — `{{listing}}` with the manage-context
+  text list of the context entries (`formatAutoListingText()`). The file is the
+  single source of truth — there is no in-code copy to drift out of sync. The
+  subagent's only tool is `rate-context` (`src/tool_definitions/rate-context.ts`
+  + `src/tools/rate-context.ts`): it takes a list of `(ID, score 1-10, reason)`
+  tuples plus a `threshold`, writes an export file of the ratings, and
+  unselects every entry scored below the threshold.
 - The picker is MVVM: `src/picker/picker-view-model.ts` owns all state and
   behavior (phase machine, key dispatch, compression orchestration) with no
   TUI imports and `handleInput()` returning `"render" | "close"`;
@@ -101,9 +106,13 @@ all go through `visibleTurnUnits()` (`src/turn-units.ts`) — the single
   `manage-context` tool; matching is by `groupId` only (no `textMatch`), and
   an empty `groupIds` array is a no-op. `context-autoselect` spawns an
   in-process subagent via `createAgentSession` whose entire toolset is
-  `context-unselect` (no extensions/skills/built-ins), so it can hide units
-  but never select, compress, or delete them; the latest user turn is never
-  offered to it, and `dryRun: true` reports without persisting. All three
+  `rate-context` (no extensions/skills/built-ins), so it can only rate
+  entries and unselect the low-rated ones — never select, compress, or
+  delete them. The subagent is given the context text list plus the
+  instruction to call `rate-context` once with one `(ID, score 1-10, reason)`
+  tuple per entry; entries scored below the `threshold` are unselected. The
+  latest user turn is never offered to it, and `dryRun: true` reports without
+  persisting. All three
   tools are `executionMode: "sequential"` because they do load-modify-save
   on the shared state snapshot — concurrent execution within one assistant
   turn would let the last `saveState` clobber the other's marks (autoselect's

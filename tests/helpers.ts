@@ -88,7 +88,7 @@ export function customEntry(entryId: string, customType = "manage-context", data
 }
 
 /** Minimal in-memory stand-in for the real pi runtime (see module doc). */
-export function makeHarness(entries: SessionEntry[]): { pi: ExtensionAPI; ctx: ExtensionContext; notifies: string[] } {
+export function makeHarness(entries: SessionEntry[], options: { cwd?: string } = {}): { pi: ExtensionAPI; ctx: ExtensionContext; notifies: string[] } {
 	let nextId = 0;
 	const notifies: string[] = [];
 	const pi = {
@@ -105,7 +105,7 @@ export function makeHarness(entries: SessionEntry[]): { pi: ExtensionAPI; ctx: E
 	} as unknown as ExtensionAPI;
 
 	const ctx = {
-		cwd: process.cwd(),
+		cwd: options.cwd ?? process.cwd(),
 		model: undefined,
 		sessionManager: {
 			getEntries: () => entries,
