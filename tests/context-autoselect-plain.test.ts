@@ -10,6 +10,7 @@ import {
 	buildAutoSelectTask,
 	summarizeAutoResult,
 } from "../src/tools/context-autoselect-engine.ts";
+import { formatAutoListingText } from "../src/tools/autoselect-prompt.ts";
 import { emptyState } from "../src/state.ts";
 import type { TurnUnit } from "../src/turn-units.ts";
 
@@ -100,13 +101,13 @@ describe("buildAutoListing", () => {
 });
 
 describe("buildAutoSelectTask", () => {
-	it("renders the given template with the listing as JSON and the focus filled in", () => {
+	it("renders the given template with the context text list and the focus filled in", () => {
 		const listing = buildAutoListing([makeUnit("e1", "assistant_text", "answer")], emptyState());
 
 		const task = buildAutoSelectTask(listing, "fixing the auth bug", "Task: {{focus}}\nUnits: {{listing}}");
 
-		expect(task).toContain("Task: fixing the auth bug");
-		expect(task).toContain('"groupId": "e1"');
+		expect(task).toBe("Task: fixing the auth bug\nUnits: " + formatAutoListingText(listing));
+		expect(task).toContain("- ID: e1");
 	});
 
 	it("notes when no focus was provided", () => {

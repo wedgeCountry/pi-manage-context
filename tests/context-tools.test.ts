@@ -4,10 +4,13 @@
  * entry onto the same entries array getEntries()/buildContextEntries() read
  * from, so loadState()/saveState() round-trip exactly like they do for the
  * interactive picker. context-autoselect is tested with a dependency-injected
- * fake child-session factory, asserting the subagent's context-unselect call
- * lands in the PARENT session's state.
+ * fake child-session factory, asserting the subagent's rate-context call lands
+ * in the PARENT session's state.
  */
-import { describe, expect, it, vi } from "vitest";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { userEntry, assistantTextEntry, makeHarness } from "./helpers.ts";
 import { CONTEXT_SELECT_TOOL_DEFINITION } from "../src/tool_definitions/context-select.ts";
@@ -128,7 +131,7 @@ describe("context-autoselect", () => {
 	});
 
 	/** Fake child session: runs the captured child tool once, like the subagent would. */
-	function makeFakeFactory(childGroupIds: string[]) {
+	function makeFakeFactory(childRatings: { id: string; score: number; reason: string }[], threshold?: number) {
 		let captured: AutoSelectChildOptions | undefined;
 		let task = "";
 		const factory: AutoSelectSessionFactory = async (options) => {
@@ -137,7 +140,7 @@ describe("context-autoselect", () => {
 				prompt: async (t: string) => {
 					task = t;
 					const childTool = options.customTools[0];
-					await childTool.execute("child-call-1", { groupIds: childGroupIds }, undefined, undefined, {} as any);
+					await childTool.execute("child-call-1", { ratings: childRatings, threshold }, undefined, undefined, {} as any);
 				},
 				abort: vi.fn(),
 				dispose: vi.fn(),
@@ -147,39 +150,67 @@ describe("context-autoselect", () => {
 		return { factory, getCaptured: () => captured, getTask: () => task };
 	}
 
+	let dir: string;
+	beforeEach(async () => {
+		dir = await mkdtemp(join(tmpdir(), "mc-autoselect-"));
+	});
+	afterEach(async () => {
+		await rm(dir, { recursive: true, force: true });
+	});
+
 	function setup() {
 		const entries: SessionEntry[] = [
 			userEntry("e1", "old brainstorming about a side project"),
 			assistantTextEntry("e2", "Sure, here are ideas..."),
 			userEntry("e3", "now fix the login bug"),
 		];
-		const harness = makeHarness(entries);
+		// Temp cwd so the subagent's rate-context export file lands in a scratch dir.
+		const harness = makeHarness(entries, { cwd: dir });
 		const units = buildTurnUnits(entries);
 		const state = loadState(harness.ctx);
 		return { ...harness, units, state };
 	}
 
-	it("gives the subagent context-unselect as its ONLY tool and lands its call in the parent state", async () => {
+	it("gives the subagent rate-context as its ONLY tool; its below-threshold ratings land in the parent state", async () => {
 		const { pi, ctx, units, state } = setup();
-		const { factory, getCaptured, getTask } = makeFakeFactory(["e1", "bogus-id"]);
+		const { factory, getCaptured, getTask } = makeFakeFactory(
+			[
+				{ id: "e1", score: 2, reason: "outdated brainstorming" },
+				{ id: "e2", score: 9, reason: "still relevant" },
+				{ id: "bogus-id", score: 1, reason: "invented id" },
+			],
+			5,
+		);
 
 		const result = await runAutoSelect(pi, ctx, units, state, { focus: "fixing the login bug" }, undefined, factory);
 
 		const captured = getCaptured()!;
 		expect(captured.customTools).toHaveLength(1);
-		expect(captured.customTools[0].name).toBe("context-unselect");
+		expect(captured.customTools[0].name).toBe("rate-context");
 		// The resource loader is built inside the default factory only, so a
 		// fake factory never performs real filesystem I/O.
 		expect(captured).not.toHaveProperty("resourceLoader");
-		expect(captured.cwd).toBe(process.cwd());
+		expect(captured.cwd).toBe(dir);
+		// The subagent gets the context TEXT LIST plus the rate-context instruction.
 		expect(getTask()).toContain("fixing the login bug");
-		expect(getTask()).toContain('"groupId": "e1"');
+		expect(getTask()).toContain("- ID: e1");
+		expect(getTask()).toMatch(/rate-context/);
+		expect(getTask()).toMatch(/between 1 and 10/);
 
-		// The child's call mutated the PARENT session's state; "bogus-id" was rejected.
+		// Only the below-threshold entry was unselected in the PARENT state; the
+		// high-rated one stays selected and the unknown id was rejected.
 		expect(result.details).toEqual({ unselected: ["e1"], dryRun: false });
 		expect(loadState(ctx).marks.e1?.mark).toBe("unselected");
+		expect(loadState(ctx).marks.e2).toBeUndefined();
 		expect(loadState(ctx).marks["bogus-id"]).toBeUndefined();
 		expect((result.content[0] as any).text).toContain("unselected 1 unit(s)");
+
+		// The rate-context call wrote its ratings export file to the cwd.
+		const files = (await readdir(dir)).filter((f) => f.startsWith("context-ratings-") && f.endsWith(".md"));
+		expect(files).toHaveLength(1);
+		const exported = await readFile(join(dir, files[0]), "utf-8");
+		expect(exported).toContain("# Context Ratings Export");
+		expect(exported).toContain("| e1 | 2 | outdated brainstorming |");
 	});
 
 	it("never offers the latest user unit to the subagent", async () => {
@@ -188,14 +219,14 @@ describe("context-autoselect", () => {
 
 		await runAutoSelect(pi, ctx, units, state, {}, undefined, factory);
 
-		expect(getTask()).toContain('"groupId": "e1"');
-		expect(getTask()).toContain('"groupId": "e2"');
-		expect(getTask()).not.toContain('"groupId": "e3"');
+		expect(getTask()).toContain("- ID: e1");
+		expect(getTask()).toContain("- ID: e2");
+		expect(getTask()).not.toContain("- ID: e3");
 	});
 
 	it("dryRun reports the chosen ids without persisting anything", async () => {
 		const { pi, ctx, units, state } = setup();
-		const { factory } = makeFakeFactory(["e1"]);
+		const { factory } = makeFakeFactory([{ id: "e1", score: 1, reason: "outdated" }]);
 
 		const result = await runAutoSelect(pi, ctx, units, state, { dryRun: true }, undefined, factory);
 

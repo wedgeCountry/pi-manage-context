@@ -1,10 +1,8 @@
 Current task: {{focus}}
 
-Turn units (JSON; groupId is the identifier, mark is the current state):
+Context text list (one entry per block; ID is the groupId of the context entry):
 {{listing}}
 
-You are reviewing the turn units of the past conversation. The model's context memory is limited, so the goal is to free up context space for what matters now: unselect every entry that is not crucial for the current task, and keep only the most important parts of the context.
+Please call the rate-context tool with a list of tuples for each context entry with ID, a score, and a short reason. The score shall be between 1 and 10, measuring importance of the context snippet for future sessions, where 1 is small importance and 10 is very high importance. Importance is measured by the usefulness of the information and also by how relevant the information is. If it is outdated, then the relevance is low.
 
-Entries worth unselecting include: repeated read calls on the same file, earlier read/peek/write/edit calls on a file that was read again later (the late read makes the earlier ones irrelevant), explorations of dead ends, and anything superseded by a later unit.
-
-Call context-unselect ONCE with the groupIds of the units to unselect. If nothing should be unselected, call context-unselect with an empty groupIds array.
+The rate-context tool writes an export file of your ratings and unselects every context entry whose score is below the threshold you pass, so choose the threshold deliberately. Call rate-context ONCE with one tuple per context entry. The latest user turn is not in the list above and must not be rated.

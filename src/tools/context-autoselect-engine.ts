@@ -5,13 +5,17 @@
  *
  * The subagent runs via the SDK's createAgentSession() in the SAME process as
  * the parent session (a `pi --mode json` subprocess couldn't reach the
- * parent's tools or state). Its whole toolset is `customTools:
- * [context-unselect]` with no extensions, skills, context files, or built-in
- * tools loaded — so by construction it can only ever unselect, never select,
- * compress, or delete. The child tool's execute() closes over the PARENT's
- * ExtensionAPI/ExtensionContext and mutates the parent session's state
- * directly; the "context" handler in src/hooks.ts applies the marks on the
- * parent's next model call.
+ * parent's tools or state). Its whole toolset is `customTools: [rate-context]`
+ * with no extensions, skills, context files, or built-in tools loaded — so by
+ * construction it can only ever rate entries and unselect the low-rated ones,
+ * never select, compress, or delete. The child tool's execute() closes over
+ * the PARENT's ExtensionAPI/ExtensionContext and mutates the parent session's
+ * state directly; the "context" handler in src/hooks.ts applies the marks on
+ * the parent's next model call. The subagent receives the manage-context TEXT
+ * LIST of the context entries (formatAutoListingText) plus its instruction
+ * (prompts/context-autoselect.md): call rate-context once with one
+ * (ID, score 1-10, reason) tuple per entry; entries scored below the threshold
+ * are unselected.
  *
  * Two halves, per the repo's pure-function + adapter split: buildAutoListing()
  * and summarizeAutoResult() are plain functions (unit-tested directly);
@@ -29,13 +33,11 @@ import {
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
 
-import { CONTEXT_UNSELECT_TOOL_DEFINITION, type ContextUnselectParams } from "../tool_definitions/context-unselect.ts";
 import { loadAutoSelectTemplate, renderAutoSelectTask } from "./autoselect-prompt.ts";
-import { loadState, saveState, type ManageContextState } from "../state.ts";
+import type { ManageContextState } from "../state.ts";
 import { oneLine, preserveLineBreaks, type TurnUnit } from "../turn-units.ts";
 import { describeMark } from "../mark-status.ts";
-import { createTool } from "./createTool.ts";
-import { runContextMark } from "./context-mark.ts";
+import { buildChildRateContextTool } from "./rate-context.ts";
 
 /** Cap for the one-line heading in the autoselect listing. */
 export const AUTO_LISTING_HEADING_MAX = 80;
@@ -87,8 +89,8 @@ export function buildAutoListing(units: TurnUnit[], state: ManageContextState): 
 /**
  * The task prompt handed to the subagent: the instruction template (see
  * src/tools/autoselect-prompt.ts — editable via prompts/context-autoselect.md
- * or a per-project .pi/context-autoselect.md) with the listing and focus
- * filled in.
+ * or a per-project .pi/context-autoselect.md) with the context TEXT LIST and
+ * the focus filled in.
  */
 export function buildAutoSelectTask(listing: AutoListingRow[], focus: string | undefined, template: string): string {
 	return renderAutoSelectTask(template, listing, focus);
@@ -122,7 +124,7 @@ export interface AutoSelectChildOptions {
 /** Injectable so tests can substitute a fake child session (and do zero real I/O). */
 export type AutoSelectSessionFactory = (options: AutoSelectChildOptions) => Promise<AutoSelectChildSession>;
 
-/** The real child session: in-process, inheriting the parent's model, with context-unselect as its only tool. */
+/** The real child session: in-process, inheriting the parent's model, with rate-context as its only tool. */
 export const defaultAutoSelectSessionFactory: AutoSelectSessionFactory = async (options) => {
 	// The resource loader is built HERE, inside the factory seam, so a fake
 	// factory in tests never touches the real ~/.pi/agent directory.
@@ -146,34 +148,6 @@ export const defaultAutoSelectSessionFactory: AutoSelectSessionFactory = async (
 
 /** Cap on child turns so a looping model can't spin forever. */
 export const MAX_CHILD_TURNS = 5;
-
-/**
- * The child's only tool: the real context-unselect definition whose execute
- * closes over the PARENT's pi and ctx. runContextMark already rejects unknown
- * groupIds, so the subagent can't invent ids. State is re-loaded per call (not
- * captured) so a multi-second subagent run never mutates a stale snapshot.
- */
-export function buildChildUnselectTool(
-	pi: ExtensionAPI,
-	ctx: ExtensionContext,
-	units: TurnUnit[],
-	dryRun: boolean,
-	unselected: string[],
-): ToolDefinition<typeof CONTEXT_UNSELECT_TOOL_DEFINITION.parameters, string[]> {
-	// The hooks deliberately ignore the child's own env.ctx and close over the
-	// PARENT's ctx instead — the whole point of the in-process subagent.
-	return createTool(CONTEXT_UNSELECT_TOOL_DEFINITION, {
-		execute: async (childParams: ContextUnselectParams) => {
-			const state = loadState(ctx);
-			const result = runContextMark(units, state, childParams.groupIds, "unselect", CONTEXT_UNSELECT_TOOL_DEFINITION.name);
-			if (result.changed) {
-				unselected.push(...result.details);
-				if (!dryRun) saveState(pi, state);
-			}
-			return { content: result.content, details: result.details };
-		},
-	});
-}
 
 /** Run the child session: prompt it, cap its turns, propagate the parent's abort signal, always dispose. */
 async function runChildSession(session: AutoSelectChildSession, task: string, signal: AbortSignal | undefined): Promise<void> {
@@ -225,7 +199,7 @@ export async function runAutoSelect(
 	const unselected: string[] = [];
 	const session = await sessionFactory({
 		model: ctx.model,
-		customTools: [buildChildUnselectTool(pi, ctx, units, dryRun, unselected)] as ToolDefinition[],
+		customTools: [buildChildRateContextTool(pi, ctx, units, dryRun, unselected)] as ToolDefinition[],
 		sessionManager: SessionManager.inMemory(),
 		cwd: ctx.cwd,
 	});
