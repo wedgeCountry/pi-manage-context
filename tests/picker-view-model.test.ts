@@ -132,3 +132,34 @@ describe("PickerViewModel", () => {
 		expect(vm.previewGroupId).toBeNull();
 	});
 });
+
+describe("PickerViewModel window greying", () => {
+	function makeWindowDeps(marks: ManageContextState["marks"] = {}) {
+		const units = [makeUnit("u1"), makeUnit("u2")];
+		const state: ManageContextState = { ...emptyState(), marks };
+		const vm = new PickerViewModel({
+			units,
+			state,
+			stateService: { load: () => state, save: vi.fn() },
+			compressionService: { compress: vi.fn(), cancel: vi.fn() },
+			onClose: vi.fn(),
+			windowConfig: { mode: "user", window: 1 },
+			windowExcluded: new Set(["u1", "u2"]),
+		});
+		return { vm, state };
+	}
+
+	it("window-hidden only applies to unmarked units; an explicit mark pins the row", () => {
+		const { vm } = makeWindowDeps({ u2: { mark: "selected" } });
+		expect(vm.isWindowHidden("u1")).toBe(true);
+		expect(vm.isWindowHidden("u2")).toBe(false);
+		expect(vm.countWindowHidden()).toBe(1);
+		expect(vm.windowActive()).toBe(true);
+	});
+
+	it("is inactive without a window config", () => {
+		const { vm } = makeDeps();
+		expect(vm.windowActive()).toBe(false);
+		expect(vm.countWindowHidden()).toBe(0);
+	});
+});

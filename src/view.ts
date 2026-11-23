@@ -125,9 +125,11 @@ export class ManageContextView implements Component {
 	private statusLine(start: number, end: number): string {
 		const nDeleted = this.vm.countDeleted();
 		const nCompressed = this.vm.countCompressed();
+		const nWindow = this.vm.countWindowHidden();
 		const parts = [this.theme.fg("muted", `${start + 1}-${end} of ${this.vm.units.length}`)];
 		if (nDeleted > 0) parts.push(this.theme.fg("error", `${nDeleted} to delete`));
 		if (nCompressed > 0) parts.push(this.theme.fg("warning", `${nCompressed} to compress`));
+		if (nWindow > 0) parts.push(this.theme.fg("muted", `${nWindow} hidden by window`));
 		return `  ${parts.join(this.theme.fg("dim", "   ·   "))}`;
 	}
 
@@ -137,6 +139,9 @@ export class ManageContextView implements Component {
 
 		lines.push(rule);
 		lines.push(`  ${this.theme.bold(this.theme.fg("accent", "Manage context"))}`);
+		if (this.vm.windowActive()) {
+			lines.push(this.theme.fg("accent", `  window: ${this.vm.windowConfig.mode} ≤ ${this.vm.windowConfig.window}`));
+		}
 		if (this.vm.phase === "confirm") {
 			const nDeleted = this.vm.countDeleted();
 			const nCompressed = this.vm.countCompressed();
@@ -173,10 +178,17 @@ export class ManageContextView implements Component {
 		for (let i = start; i < end; i++) {
 			const unit = this.vm.units[i];
 			const isCursor = i === this.vm.cursor;
-			const glyph = this.glyphFor(this.vm.effectiveMark(unit.groupId));
+			// Window-hidden rows (unmarked but outside the active window) render
+			// dimmed with a "(window)" tag — visually distinct from a manual
+			// unselected, and selecting one pins it above the cap.
+			const windowHidden = this.vm.isWindowHidden(unit.groupId);
+			const glyph = windowHidden
+				? this.theme.fg("dim", symbolForMark(this.vm.effectiveMark(unit.groupId)))
+				: this.glyphFor(this.vm.effectiveMark(unit.groupId));
 			const cursorMark = isCursor ? this.theme.fg("accent", "› ") : "  ";
 			const label = this.labelFor(unit);
-			const text = isCursor ? this.theme.bold(label) : label;
+			const windowTag = windowHidden ? this.theme.fg("dim", " (window)") : "";
+			const text = (isCursor ? this.theme.bold(label) : label) + windowTag;
 			const tokensText = `${unit.tokenEstimate}t`;
 			const tokensRendered = this.theme.fg("dim", tokensText);
 

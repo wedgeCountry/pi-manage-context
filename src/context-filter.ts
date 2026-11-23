@@ -46,11 +46,19 @@ export function buildCompressedReplacement(group: TurnUnitGroup, compressedText:
 	return [cloneWithReplacedContent(original, compressedText), ...rest];
 }
 
-/** Rebuilds the outgoing message array for one LLM call, applying all marks. */
+/**
+ * Rebuilds the outgoing message array for one LLM call, applying all marks
+ * plus the ephemeral context-window exclusion (`windowExcluded`, from
+ * computeWindowExcluded in window-filter.ts). Manual marks always win over
+ * the window: only units with NO mark at all can be window-excluded — an
+ * explicit "selected"/"compressed" mark pins a unit above the cap, and
+ * "unselected"/"deleted" stay excluded even inside the window.
+ */
 export function buildFilteredMessages(
 	entries: SessionEntry[],
 	units: TurnUnitGroup[],
 	state: ManageContextState,
+	windowExcluded: Set<string> = new Set(),
 ): AgentMessage[] {
 	const unitByEntryId = new Map<string, TurnUnitGroup>();
 	for (const u of units) for (const id of u.entryIds) unitByEntryId.set(id, u);
@@ -76,6 +84,7 @@ export function buildFilteredMessages(
 		const mark = info?.mark ?? "selected";
 
 		if (mark === "deleted" || mark === "unselected") continue;
+		if (!info && windowExcluded.has(unit.groupId)) continue; // window-hidden: unmarked units only
 		if (info?.compressedText) {
 			// Realized compressions stay substituted even after the mark
 			// resolves back to "selected" once compaction succeeds.

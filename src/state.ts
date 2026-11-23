@@ -26,20 +26,38 @@ export interface MarkInfo {
 	compressedTokenEstimate?: number;
 }
 
+/** Which message category a context window limits. */
+export type WindowMode = "tool" | "assistant" | "user";
+
+/**
+ * Context-window limit: when `mode` is set, only the latest `window` turn
+ * units per message kind inside that mode's category stay visible to the
+ * model (tool = tool-call units; assistant = assistant messages + tool
+ * calls; user = all of those + user messages). null mode/window = no window
+ * filtering. Window exclusions are ephemeral — they are never written into
+ * `marks`; manual marks always win (see context-filter.ts).
+ */
+export interface WindowConfig {
+	mode: WindowMode | null;
+	window: number | null;
+}
+
 export interface ManageContextState {
-	version: 2;
+	version: 3;
 	/** provider/id of the model used for compression. Falls back to ctx.model when unset. */
 	compressionModel?: { provider: string; id: string };
 	/** keyed by TurnUnit.groupId */
 	marks: Record<string, MarkInfo>;
 	/** Switch checked by the read tool's "tool_result" hook. Toggled via /toggle-read-hook. */
 	readHookEnabled: boolean;
+	/** /mc config override; when present it fully replaces the settings.json window default. */
+	windowConfig?: WindowConfig;
 }
 
 export const STATE_CUSTOM_TYPE = "manage-context";
 
 export function emptyState(): ManageContextState {
-	return { version: 2, marks: {}, readHookEnabled: false };
+	return { version: 3, marks: {}, readHookEnabled: false };
 }
 
 /**
@@ -52,12 +70,13 @@ function migrate(raw: unknown): ManageContextState | null {
 	if (!raw || typeof raw !== "object") return null;
 	const data = raw as Record<string, unknown>;
 
-	if (data.version === 2) return data as unknown as ManageContextState;
+	if (data.version === 3) return data as unknown as ManageContextState;
 
-	if (data.version === 1) {
-		// v1 → v2: same mark shape, only the version constant changed.
-		const state = data as unknown as Omit<ManageContextState, "version"> & { version: 1 };
-		return { ...state, version: 2 };
+	if (data.version === 2 || data.version === 1) {
+		// v1/v2 → v3: same mark shape, only the version constant changed (v3
+		// adds the optional windowConfig, which old snapshots simply lack).
+		const state = data as unknown as Omit<ManageContextState, "version"> & { version: number };
+		return { ...state, version: 3 };
 	}
 
 	return null;

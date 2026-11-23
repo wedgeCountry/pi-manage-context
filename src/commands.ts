@@ -16,7 +16,9 @@ import type {
 
 import { exportUnitsToMarkdown } from "./markdown-export.ts";
 import { loadState, saveState } from "./state.ts";
-import { visibleTurnUnits } from "./turn-units.ts";
+import { buildTurnUnitGroups, visibleTurnUnits } from "./turn-units.ts";
+import { computeWindowExcluded, isWindowActive, loadSettingsWindowConfig, parseWindowConfigArgs, resolveWindowConfig } from "./window-filter.ts";
+import { WindowConfigView } from "./config-view.ts";
 import { runAutoSelect } from "./tools/context-autoselect-engine.ts";
 import { ManageContextView } from "./view.ts";
 import { PickerViewModel } from "./picker/picker-view-model.ts";
@@ -54,16 +56,87 @@ async function runAutoSelectCommand(pi: ExtensionAPI, ctx: ExtensionCommandConte
 	}
 }
 
+/**
+ * Handle the `/mc config` subcommand: bare `config` opens the interactive
+ * dialogue (needs a UI); `config off` / `config <tool|assistant|user> <N>`
+ * set the window directly and persist it as the session's windowConfig
+ * override (which takes precedence over the agent-dir settings.json).
+ */
+async function runConfigCommand(pi: ExtensionAPI, ctx: ExtensionCommandContext, args: string): Promise<void> {
+	const state = loadState(ctx);
+	if (args === "") {
+		if (!ctx.hasUI) {
+			ctx.ui.notify(
+				"mc config needs an interactive terminal — use '/mc config <tool|assistant|user> <N>' or '/mc config off'",
+				"warning",
+			);
+			return;
+		}
+		const current = resolveWindowConfig(state, loadSettingsWindowConfig());
+		await ctx.ui.custom<void>(
+			(tui, theme, _kb, done) =>
+				new WindowConfigView(
+					tui,
+					theme,
+					current,
+					(config) => {
+						state.windowConfig = config;
+						saveState(pi, state);
+						done();
+					},
+					() => done(),
+				),
+			{ overlay: true, overlayOptions: { width: "100%", maxHeight: "100%" } },
+		);
+		const active = resolveWindowConfig(state, loadSettingsWindowConfig());
+		ctx.ui.notify(
+			isWindowActive(active) ? `Context window: ${active.mode} ≤ ${active.window}` : "Context window filtering off",
+			"info",
+		);
+		return;
+	}
+	const parsed = parseWindowConfigArgs(args);
+	if (!parsed.ok) {
+		ctx.ui.notify(`mc config: ${parsed.error}`, "error");
+		return;
+	}
+	state.windowConfig = parsed.config;
+	saveState(pi, state);
+	ctx.ui.notify(
+		parsed.config.mode === null
+			? "Context window filtering off"
+			: `Context window: ${parsed.config.mode} ≤ ${parsed.config.window}`,
+		"info",
+	);
+}
+
 type SlashCommand = Parameters<ExtensionAPI["registerCommand"]>[1];
 
 export function registerCommands(pi: ExtensionAPI, cachedModels: () => Model<Api>[]): void {
 	// /mc is an alias: same definition object registered under a second name.
 	const manageContextCommand: SlashCommand = {
-		description: "Review, select, compress, or delete messages from the model's context; 'auto [focus]' runs the context-autoselect subagent right away (alias: /mc)",
+		description: "Review, select, compress, or delete messages from the model's context; 'auto [focus]' runs the context-autoselect subagent right away, 'config' sets the context-window limit (alias: /mc)",
 		getArgumentCompletions(prefix: string): AutocompleteItem[] | null {
 			const items: AutocompleteItem[] = [];
 			if ("auto".startsWith(prefix)) {
 				items.push({ value: "auto", label: "auto — run the context-autoselect subagent now, optionally with a focus description" });
+			}
+			if ("config".startsWith(prefix)) {
+				items.push({ value: "config", label: "config — context window limit: bare opens a dialogue, 'config off' disables, 'config <tool|assistant|user> <N>' sets it" });
+			}
+			if (prefix.startsWith("config ")) {
+				const sub = prefix.slice("config ".length);
+				for (const m of ["off", "tool", "assistant", "user"]) {
+					if (m.startsWith(sub)) {
+						items.push({
+							value: `config ${m}`,
+							label:
+								m === "off"
+									? "config off — disable window filtering"
+									: `config ${m} <N> — keep the latest N ${m === "tool" ? "tool calls" : m === "assistant" ? "assistant messages and tool calls" : "user, assistant and tool messages"}`,
+						});
+					}
+				}
 			}
 			const models = cachedModels();
 			items.push(...models.map((m) => ({ value: `${m.provider}/${m.id}`, label: `${m.provider}/${m.id}` })));
@@ -77,6 +150,11 @@ export function registerCommands(pi: ExtensionAPI, cachedModels: () => Model<Api
 			const auto = parseAutoArgs(trimmed);
 			if (auto) {
 				await runAutoSelectCommand(pi, ctx, auto.focus);
+				return;
+			}
+
+			if (trimmed === "config" || trimmed.startsWith("config ")) {
+				await runConfigCommand(pi, ctx, trimmed.slice("config".length).trim());
 				return;
 			}
 
@@ -121,6 +199,12 @@ export function registerCommands(pi: ExtensionAPI, cachedModels: () => Model<Api
 				return;
 			}
 
+			// Window-limit info for the picker header/grey-out: computed over
+			// ALL structural groups (marks ignored for counting), not just the
+			// visible units.
+			const windowConfig = resolveWindowConfig(state, loadSettingsWindowConfig());
+			const windowExcluded = computeWindowExcluded(buildTurnUnitGroups(entries), windowConfig);
+
 			await ctx.ui.custom<void>(
 				(tui, theme, _kb: KeybindingsManager, done) => {
 					const vm = new PickerViewModel({
@@ -129,6 +213,8 @@ export function registerCommands(pi: ExtensionAPI, cachedModels: () => Model<Api
 						stateService: createStateService(pi, ctx),
 						compressionService: createCompressionService(ctx, state),
 						onClose: done,
+						windowConfig,
+						windowExcluded,
 					});
 					return new ManageContextView(tui, theme, vm, done);
 				},

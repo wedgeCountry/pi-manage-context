@@ -15,8 +15,9 @@ import type { ContextEvent, ExtensionAPI, ExtensionContext, ToolResultEvent } fr
 import { isReadToolResult } from "@earendil-works/pi-coding-agent";
 
 import { buildFilteredMessages } from "./context-filter.ts";
-import { loadState, saveState, hasMarks, pruneMarks } from "./state.ts";
+import { loadState, saveState, hasMarks, pruneMarks, type WindowConfig } from "./state.ts";
 import { buildTurnUnitGroups, buildTurnUnits, type TurnUnit } from "./turn-units.ts";
+import { computeWindowExcluded, isWindowActive, loadSettingsWindowConfig, resolveWindowConfig } from "./window-filter.ts";
 
 export const SELF_UNSELECT_TOOL_NAMES = new Set(["context-select", "context-unselect", "context-autoselect"]);
 
@@ -64,15 +65,22 @@ export function unitHasMatchingRead(unit: TurnUnit, resolvedPath: string, curren
 	return typeof path === "string" && resolve(path) === resolvedPath;
 }
 
-/** The "context" event: apply marks to the outgoing messages, skipping all work when nothing is marked. */
-export function handleContext(_event: ContextEvent, ctx: ExtensionContext) {
+/**
+ * The "context" event: apply marks plus the ephemeral context-window
+ * exclusion to the outgoing messages, skipping all work when neither is
+ * active. `settingsConfig` is the agent-dir settings.json default; tests
+ * pass it explicitly to avoid touching the real agent dir.
+ */
+export function handleContext(_event: ContextEvent, ctx: ExtensionContext, settingsConfig?: WindowConfig) {
 	const state = loadState(ctx);
-	if (!hasMarks(state)) return; // nothing to change — skip all grouping work
+	const windowConfig = resolveWindowConfig(state, settingsConfig ?? loadSettingsWindowConfig());
+	if (!hasMarks(state) && !isWindowActive(windowConfig)) return; // nothing to change — skip all grouping work
 	const entries = ctx.sessionManager.buildContextEntries();
 	// Cheap structural groups only: the filter needs entryIds/kind, not
 	// the enriched metadata the picker and tools use.
 	const groups = buildTurnUnitGroups(entries);
-	return { messages: buildFilteredMessages(entries, groups, state) };
+	const windowExcluded = computeWindowExcluded(groups, windowConfig);
+	return { messages: buildFilteredMessages(entries, groups, state, windowExcluded) };
 }
 
 /** tool_result hook: with the read hook enabled, unselect read() calls whose result matches a marked unit. */
@@ -152,7 +160,7 @@ export function handleSelfUnselectToolResult(event: ToolResultEvent, ctx: Extens
 
 /** Register all session event hooks on the extension API. */
 export function registerHooks(pi: ExtensionAPI): void {
-	pi.on("context", (event, ctx) => handleContext(event, ctx));
+	pi.on("context", (event, ctx) => handleContext(event, ctx, loadSettingsWindowConfig()));
 	pi.on("tool_result", (event, ctx) => handleReadToolResult(event, ctx, pi));
 	pi.on("tool_result", (event, ctx) => handleSelfUnselectToolResult(event, ctx, pi));
 }
