@@ -10,11 +10,12 @@ import { matchesKey } from "@earendil-works/pi-tui";
 
 import { CompressionQueue, defaultResolveMark, type CompressionEvent } from "../compression-queue.ts";
 import { MarksController, type MarkIntent } from "../marks-controller.ts";
-import type { Mark, ManageContextState } from "../state.ts";
+import type { Mark, ManageContextState, WindowConfig } from "../state.ts";
 import { oneLine } from "../turn-units.ts";
 import type { ToolCallInfo, TurnUnit } from "../turn-units.ts";
 import type { CompressionService } from "../services/compression-service.ts";
 import type { StateService } from "../services/state-service.ts";
+import { isWindowActive, NO_WINDOW } from "../window-filter.ts";
 import { defaultPickerConfig, type PickerConfig } from "./picker-config.ts";
 
 export type PickerPhase = "editing" | "confirm" | "processing";
@@ -35,6 +36,10 @@ export interface PickerViewModelDeps {
 	/** Called when the picker is finished (esc/ctrl+c, or processing completed). */
 	onClose: () => void;
 	config?: Partial<PickerConfig>;
+	/** Resolved context-window config, for the header hint. */
+	windowConfig?: WindowConfig;
+	/** groupIds outside the active window (computed over ALL units, marks ignored for counting). */
+	windowExcluded?: Set<string>;
 }
 
 export class PickerViewModel {
@@ -68,6 +73,8 @@ export class PickerViewModel {
 	readonly config: PickerConfig;
 	readonly units: TurnUnit[];
 	readonly state: ManageContextState;
+	readonly windowConfig: WindowConfig;
+	private readonly windowExcluded: Set<string>;
 	private readonly stateService: StateService;
 	private readonly compressionService: CompressionService;
 	private readonly onClose: () => void;
@@ -81,9 +88,29 @@ export class PickerViewModel {
 		this.compressionService = deps.compressionService;
 		this.onClose = deps.onClose;
 		this.config = { ...defaultPickerConfig, ...deps.config };
+		this.windowConfig = deps.windowConfig ?? { ...NO_WINDOW };
+		this.windowExcluded = deps.windowExcluded ?? new Set();
 		this.marks = new MarksController(this.state, deps.units.map((u) => u.groupId));
 		this.previewContentWidth = this.config.sectionRuleWidth;
 		this.maxVisible = this.config.minListRows;
+	}
+
+	/** True when the context window is the active filter. */
+	windowActive(): boolean {
+		return isWindowActive(this.windowConfig);
+	}
+
+	/**
+	 * True when the window (not a manual mark) hides this unit in the hook:
+	 * only unmarked units are window-hidden — an explicit mark pins the unit
+	 * above the cap, matching buildFilteredMessages.
+	 */
+	isWindowHidden(groupId: string): boolean {
+		return this.windowExcluded.has(groupId) && this.state.marks[groupId] === undefined;
+	}
+
+	countWindowHidden(): number {
+		return this.units.filter((u) => this.isWindowHidden(u.groupId)).length;
 	}
 
 	markOf(groupId: string): Mark {
@@ -115,7 +142,8 @@ export class PickerViewModel {
 	 * this at the top of every render() with the current terminal rows.
 	 */
 	updateLayout(terminalRows: number): void {
-		const chrome = 7; // rule + title + help/legend-or-confirm + rule + status + slack, see renderEditing
+		// rule + title + window hint (only when active) + help/legend-or-confirm + rule + status + slack, see renderEditing
+		const chrome = this.windowActive() ? 8 : 7;
 		const remaining = Math.max(0, terminalRows - chrome - 1);
 		if (this.previewGroupId) {
 			// The preview pane takes a fixed fraction of the remaining rows;

@@ -107,7 +107,7 @@ describe("state migration + GC", () => {
 			},
 		} as never;
 		const state = loadState(ctx);
-		expect(state.version).toBe(2);
+		expect(state.version).toBe(3);
 		expect(state.marks.u1?.mark).toBe("deleted");
 		expect(state.readHookEnabled).toBe(true);
 	});

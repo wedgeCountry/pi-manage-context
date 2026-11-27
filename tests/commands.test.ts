@@ -1,10 +1,26 @@
 /**
  * Tests for the /manage_context argument parsing: the optional `auto`
- * argument that runs the context-autoselect subagent right away.
+ * argument that runs the context-autoselect subagent right away, and the
+ * `config` subcommand that sets the context-window limit.
  */
 import { describe, expect, it, vi } from "vitest";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { parseAutoArgs, registerCommands } from "../src/commands.ts";
+import { loadState } from "../src/state.ts";
+import { makeHarness } from "./helpers.ts";
+
+type CommandHandler = (args: string, ctx: never) => Promise<void>;
+
+/** Register the commands on a harness pi (appendEntry-backed) and return the /manage_context handler. */
+function setup() {
+	const entries: SessionEntry[] = [];
+	const { pi: basePi, ctx, notifies } = makeHarness(entries);
+	const registerCommand = vi.fn();
+	const pi = Object.assign(basePi, { registerCommand }) as unknown as ExtensionAPI;
+	registerCommands(pi, () => []);
+	const cmd = registerCommand.mock.calls.find((c) => c[0] === "manage_context")![1] as { handler: CommandHandler };
+	return { handler: cmd.handler, ctx, notifies, entries };
+}
 
 describe("parseAutoArgs (/manage_context auto)", () => {
 	it("parses bare 'auto' with no focus", () => {
@@ -38,5 +54,36 @@ describe("registerCommands", () => {
 		const manageContext = registerCommand.mock.calls.find((c) => c[0] === "manage_context")![1];
 		const mc = registerCommand.mock.calls.find((c) => c[0] === "mc")![1];
 		expect(mc).toBe(manageContext);
+	});
+});
+
+describe("/mc config subcommand", () => {
+	it("'config off' persists a null windowConfig and notifies", async () => {
+		const { handler, ctx, notifies } = setup();
+		await handler("config off", ctx as never);
+		expect(loadState(ctx).windowConfig).toEqual({ mode: null, window: null });
+		expect(notifies.at(-1)).toContain("off");
+	});
+
+	it("'config tool 10' persists { mode: tool, window: 10 } and notifies", async () => {
+		const { handler, ctx, notifies } = setup();
+		await handler("config tool 10", ctx as never);
+		expect(loadState(ctx).windowConfig).toEqual({ mode: "tool", window: 10 });
+		expect(notifies.at(-1)).toContain("tool ≤ 10");
+	});
+
+	it("invalid args notify an error and persist nothing", async () => {
+		const { handler, ctx, notifies, entries } = setup();
+		await handler("config tool banana", ctx as never);
+		expect(notifies.at(-1)).toContain("mc config:");
+		expect(loadState(ctx).windowConfig).toBeUndefined();
+		expect(entries).toHaveLength(0);
+	});
+
+	it("bare 'config' without a UI warns instead of opening a dialogue", async () => {
+		const { handler, ctx, notifies, entries } = setup();
+		await handler("config", ctx as never);
+		expect(notifies.at(-1)).toContain("interactive terminal");
+		expect(entries).toHaveLength(0);
 	});
 });

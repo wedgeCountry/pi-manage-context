@@ -7,6 +7,9 @@
  *   /manage_context auto [focus]         run the context-autoselect subagent right away
  *   /manage_context <provider>/<modelId> set the compression model, then open the picker
  *   /manage_context model                print the currently configured compression model
+ *   /manage_context config               interactive context-window dialogue (mode off|tool|assistant|user + window N)
+ *   /manage_context config off           disable context-window filtering
+ *   /manage_context config <mode> <N>    keep only the latest N units per kind of that category visible to the model
  *   /export_context [filename.md]        write the summarized context as a markdown file to the current dir
  *   /toggle-read-hook                    toggle the read tool's post-execution hook (default: off)
  *
